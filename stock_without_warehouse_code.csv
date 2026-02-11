@@ -1,0 +1,4 @@
+random_col, SKU ,  Stock Pcs,  Junk
+ignore,   ITEM-010,  140,       xxx
+ignore,   ITEM-011,  220,       yyy
+ignore,   ,          300,       zzz

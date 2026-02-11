@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="header">
+    <h2>Master Configuration</h2>
+    <a href="{{ url_for('index') }}" class="button" style="background-color: #6c757d;">Back to Home</a>
+</div>
+
+<div class="card">
+    <table style="width: 100%; border-collapse: collapse;">
+        <thead>
+            <tr style="background-color: #f8f9fa; border-bottom: 2px solid #dee2e6;">
+                <th style="padding: 12px; text-align: left;">Column Name</th>
+                <th style="padding: 12px; text-align: center;">Mandatory</th>
+                <th style="padding: 12px; text-align: left;">Data Type</th>
+                <th style="padding: 12px; text-align: left;">Aliases</th>
+                <th style="padding: 12px; text-align: center;">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for name, conf in configs.items() %}
+            <tr style="border-bottom: 1px solid #dee2e6;">
+                <td style="padding: 12px; font-weight: bold;">{{ name }}</td>
+
+                <!-- Update Form -->
+                <form action="{{ url_for('update_config') }}" method="POST">
+                    <input type="hidden" name="id" value="{{ conf.id }}">
+                    <td style="padding: 12px; text-align: center;">
+                        <input type="checkbox" name="is_mandatory" {% if conf.is_mandatory %}checked{% endif %}>
+                    </td>
+                    <td style="padding: 12px;">
+                        <select name="data_type" style="padding: 5px; border-radius: 4px; border: 1px solid #ced4da;">
+                            <option value="str" {% if conf.data_type=='str' %}selected{% endif %}>String</option>
+                            <option value="int" {% if conf.data_type=='int' %}selected{% endif %}>Integer</option>
+                            <option value="date" {% if conf.data_type=='date' %}selected{% endif %}>Date</option>
+                        </select>
+                    </td>
+                    <td style="padding: 12px;">
+                        <div style="display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 5px;">
+                            {% for alias in conf.aliases %}
+                            {% if alias != name %}
+                            <span
+                                style="background-color: #e9ecef; padding: 2px 8px; border-radius: 12px; font-size: 0.9em; display: inline-flex; align-items: center;">
+                                {{ alias }}
+                            </span>
+                            {% endif %}
+                            {% endfor %}
+                        </div>
+                        <!-- Add Alias Form -->
+
+                    </td>
+                    <td style="padding: 12px; text-align: center;">
+                        <button type="submit" class="button" style="padding: 5px 10px; font-size: 0.9em;">Save</button>
+                    </td>
+                </form>
+            </tr>
+            <!-- Alias Row (Separate for cleanliness) -->
+            <tr style="border-bottom: 2px solid #dee2e6;">
+                <td colspan="5" style="padding: 0 12px 12px 12px;">
+                    <small><strong>Manage Aliases:</strong></small>
+                    <div style="display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px;">
+                        {% for alias in conf.aliases_list %} <!-- Updated struct expectation -->
+                        <span
+                            style="background-color: #e2e6ea; padding: 4px 8px; border-radius: 4px; font-size: 0.85em; display: inline-flex; align-items: center; border: 1px solid #ced4da;">
+                            {{ alias.name }}
+                            <a href="{{ url_for('delete_alias', alias_id=alias.id) }}"
+                                style="color: #dc3545; margin-left: 6px; text-decoration: none; font-weight: bold;">&times;</a>
+                        </span>
+                        {% endfor %}
+
+                        <form action="{{ url_for('add_alias') }}" method="POST" style="display: inline-flex; gap: 5px;">
+                            <input type="hidden" name="column_id" value="{{ conf.id }}">
+                            <input type="text" name="alias_name" placeholder="New alias"
+                                style="padding: 2px 5px; border: 1px solid #ced4da; border-radius: 3px;" required>
+                            <button type="submit"
+                                style="background-color: #28a745; color: white; border: none; border-radius: 3px; cursor: pointer;">+</button>
+                        </form>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

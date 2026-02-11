@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="controls">
+    <h3>Data Management</h3>
+
+    <div>
+        <strong>Export Data:</strong>
+        <a href="{{ url_for('export_file', format_type='csv') }}" class="btn">Download CSV</a>
+        <a href="{{ url_for('export_file', format_type='excel') }}" class="btn">Download Excel</a>
+    </div>
+
+    <div style="margin-top: 15px;">
+        <strong>Import Stock Data:</strong>
+        <form action="{{ url_for('import_stock') }}" method="post" enctype="multipart/form-data"
+            style="display: inline-block;">
+            <input type="file" name="file" accept=".csv, .xlsx, .xls" required>
+            <button type="submit" class="btn btn-primary" style="background-color: #6f42c1;">Upload Stock</button>
+        </form>
+        <small style="display:block; margin-top:5px; color: #666;">Required columns: SKU, Kode Gudang, Stock Pcs</small>
+    </div>
+</div>
+
+<h3>Current Data</h3>
+{% if data %}
+<table>
+    <thead>
+        <tr>
+            {% for key in data[0].keys() %}
+            <th>{{ key }}</th>
+            {% endfor %}
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in data %}
+        <tr>
+            {% for value in row.values() %}
+            <td>{{ value }}</td>
+            {% endfor %}
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No data found.</p>
+{% endif %}
+
+{% endblock %}
