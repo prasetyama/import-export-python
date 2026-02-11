@@ -257,14 +257,15 @@ def import_stock_data(filename):
         errors = []
 
         insert_query = """
-            INSERT INTO stocks (sku, warehouse_code, stock_pcs, stock_box, stock_cs, date)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            INSERT INTO stocks (sku, warehouse_code, stock_pcs, stock_box, stock_cs, date, dist_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE
             warehouse_code=VALUES(warehouse_code),
             stock_pcs=VALUES(stock_pcs),
             stock_box=VALUES(stock_box),
             stock_cs=VALUES(stock_cs),
-            date=VALUES(date)
+            date=VALUES(date),
+            dist_id=VALUES(dist_id)
         """
 
         data_to_insert = []
@@ -288,6 +289,7 @@ def import_stock_data(filename):
             stock_box = get_val('stock_box')
             stock_cs = get_val('stock_cs')
             date_val = get_val('date')
+            dist_id = get_val('dist_id')
 
             # Dynamic Row-Level Validation
             for key in configs:
@@ -301,7 +303,8 @@ def import_stock_data(filename):
                     'stock_pcs': stock_pcs,
                     'stock_box': stock_box,
                     'stock_cs': stock_cs,
-                    'date': date_val
+                    'date': date_val,
+                    'dist_id': dist_id
                 }
                 
                 val = val_map.get(key)
@@ -339,6 +342,7 @@ def import_stock_data(filename):
                 stock_pcs = int(stock_pcs) if pd.notna(stock_pcs) and str(stock_pcs).strip() != '' else 0
                 stock_box = int(stock_box) if pd.notna(stock_box) and str(stock_box).strip() != '' else 0
                 stock_cs = int(stock_cs) if pd.notna(stock_cs) and str(stock_cs).strip() != '' else 0
+                dist_id = int(dist_id) if pd.notna(dist_id) and str(dist_id).strip() != '' else 0
                 
                 # Date
                 if pd.isna(date_val) or str(date_val).strip() == '':
@@ -352,7 +356,7 @@ def import_stock_data(filename):
                          parsed = pd.to_datetime(date_val, dayfirst=True)
                          date_val = parsed.strftime('%Y-%m-%d')
 
-                data_to_insert.append((str(sku), str(warehouse), stock_pcs, stock_box, stock_cs, date_val))
+                data_to_insert.append((str(sku), str(warehouse), stock_pcs, stock_box, stock_cs, date_val, dist_id))
             except Exception as e:
                 # Should be caught by type check, but just in case
                 row_errors.append(f"Row {index+1}: Data conversion error {str(e)}")
