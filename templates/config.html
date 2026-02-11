@@ -6,6 +6,16 @@
     <a href="{{ url_for('index') }}" class="button">Back to Home</a>
 </div>
 
+<div style="margin-bottom: 20px;">
+    <strong>Configure:</strong>
+    <a href="{{ url_for('config_page', table='stocks') }}" class="button">
+        Stocks
+    </a>
+    <a href="{{ url_for('config_page', table='sales') }}" class="button">
+        Sales
+    </a>
+</div>
+
 <div class="card">
     <table style="width: 100%; border-collapse: collapse;">
         <thead>
@@ -25,6 +35,7 @@
                 <!-- Update Form -->
                 <form action="{{ url_for('update_config') }}" method="POST">
                     <input type="hidden" name="id" value="{{ conf.id }}">
+                    <input type="hidden" name="table_name" value="{{ current_table }}">
                     <td style="padding: 12px; text-align: center;">
                         <input type="checkbox" name="is_mandatory" {% if conf.is_mandatory %}checked{% endif %}>
                     </td>
@@ -70,6 +81,7 @@
 
                         <form action="{{ url_for('add_alias') }}" method="POST" style="display: inline-flex; gap: 5px;">
                             <input type="hidden" name="column_id" value="{{ conf.id }}">
+                            <input type="hidden" name="table_name" value="{{ current_table }}">
                             <input type="text" name="alias_name" placeholder="New alias"
                                 style="padding: 2px 5px; border: 1px solid #ced4da; border-radius: 3px;" required>
                             <button type="submit"

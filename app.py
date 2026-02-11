@@ -15,39 +15,47 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 @app.route('/config')
 def config_page():
-    configs = data_manager.get_column_configs()
-    return render_template('config.html', configs=configs)
+    # Default to stocks if not provided
+    current_table = request.args.get('table', 'stocks')
+    configs = data_manager.get_column_configs(table_name=current_table)
+    return render_template('config.html', configs=configs, current_table=current_table)
 
 @app.route('/config/update', methods=['POST'])
 def update_config():
     column_id = request.form.get('id')
     is_mandatory = request.form.get('is_mandatory') == 'on'
     data_type = request.form.get('data_type')
+    table_name = request.form.get('table_name', 'stocks') # Need to pass this back for redirect
     
     if data_manager.update_column_config(column_id, is_mandatory, data_type):
         flash("Configuration updated successfully.", "success")
     else:
         flash("Failed to update configuration.", "error")
-    return redirect(url_for('config_page'))
+    return redirect(url_for('config_page', table=table_name))
 
 @app.route('/config/alias/add', methods=['POST'])
 def add_alias():
     column_id = request.form.get('column_id')
     alias_name = request.form.get('alias_name')
+    table_name = request.form.get('table_name', 'stocks')
     
     if alias_name and data_manager.add_alias(column_id, alias_name):
         flash("Alias added.", "success")
     else:
         flash("Failed to add alias.", "error")
-    return redirect(url_for('config_page'))
+    return redirect(url_for('config_page', table=table_name))
 
 @app.route('/config/alias/delete/<int:alias_id>')
 def delete_alias(alias_id):
+    # To redirect back to the correct table, we might need to know which table the alias belonged to.
+    # For now simplicity, we might lose the table context or need to look it up.
+    # Or strict redirect to default. Let's try to get it from referrer or arg if possible.
+    # Simpler: just redirect to config_page, default stocks. User can switch back.
     if data_manager.delete_alias(alias_id):
         flash("Alias deleted.", "success")
     else:
         flash("Failed to delete alias.", "error")
-    return redirect(url_for('config_page'))
+    return redirect(request.referrer or url_for('config_page'))
 
 @app.route('/')
 def index():
@@ -83,10 +91,19 @@ def import_file():
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
         
-        if data_manager.import_data(filepath):
-            flash('Data imported successfully!')
+        # Determine import type based on filename
+        # This function handles routing to stock or sales import
+        result, messages = data_manager.import_file_process(filepath)
+        
+        if result:
+             # messages is a dict with success_count and errors
+             flash(f"Import complete. Processed {messages['success_count']} records.")
+             if messages['errors']:
+                 for error in messages['errors']:
+                     flash(f"Warning: {error}")
         else:
-            flash('Failed to import data.')
+             # messages is a list of errors
+             flash(f"Import Failed: {messages[0]}")
         
         # Clean up uploaded file
         try:
@@ -104,46 +121,16 @@ def export_file(format_type):
         filename = f"export.{format_type}"
     filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
     
+    # Export currently hardcoded to stocks table in data_manager.export_data
+    # For now, leaving as is unless user asked for sales export (they didn't).
     if data_manager.export_data(filepath, format_type):
         return send_file(filepath, as_attachment=True)
     else:
         flash('Failed to export data.')
         return redirect(url_for('index'))
 
-@app.route('/import/stock', methods=['POST'])
-def import_stock():
-    if 'file' not in request.files:
-        flash('No file part')
-        return redirect(url_for('index'))
-    
-    file = request.files['file']
-    if file.filename == '':
-        flash('No selected file')
-        return redirect(url_for('index'))
-    
-    if file:
-        filename = secure_filename(file.filename)
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        file.save(filepath)
-        
-        success, result = data_manager.import_stock_data(filepath)
-        
-        if success:
-            flash(f"Stock import complete. Processed {result['success_count']} records.")
-            if result['errors']:
-                for error in result['errors']:
-                    flash(f"Warning: {error}")
-        else:
-            # If success is False, result is a list of errors
-            flash(f"Failed to import stock data: {result[0]}")
-        
-        # Clean up uploaded file
-        try:
-            os.remove(filepath)
-        except:
-            pass
-            
-    return redirect(url_for('index'))
+# Removed separate /import/stock route, merged into generic /import above
+
 
 if __name__ == '__main__':
     app.run(debug=True)

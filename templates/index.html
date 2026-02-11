@@ -11,13 +11,20 @@
     </div>
 
     <div style="margin-top: 15px;">
-        <strong>Import Stock Data:</strong>
-        <form action="{{ url_for('import_stock') }}" method="post" enctype="multipart/form-data"
+        <strong>Import Data:</strong>
+        <form action="{{ url_for('import_file') }}" method="post" enctype="multipart/form-data"
             style="display: inline-block;">
             <input type="file" name="file" accept=".csv, .xlsx, .xls" required>
-            <button type="submit" class="btn btn-primary" style="background-color: #6f42c1;">Upload Stock</button>
+            <button type="submit" class="btn btn-primary" style="background-color: #6f42c1;">Upload File</button>
         </form>
-        <small style="display:block; margin-top:5px; color: #666;">Required columns: sku, warehouse_code, stock_pcs, dist_id</small>
+        <div style="margin-top:5px; color: #666; font-size: 0.9em;">
+            <p style="margin: 2px 0;"><strong>Instructions:</strong></p>
+            <ul style="margin: 2px 0; padding-left: 20px;">
+                <li>For <strong>Stock</strong> import: Filename must be "PV_INVENTORY" (e.g., <em>PV_INVENTORY.csv</em>)</li>
+                <li>For <strong>Sales</strong> import: Filename must be "PV_SALESUNION" (e.g., <em>PV_SALESUNION.xlsx</em>)
+                </li>
+            </ul>
+        </div>
     </div>
 </div>
 
@@ -35,7 +42,7 @@
         {% for row in data %}
         <tr>
             {% for value in row.values() %}
-            <td>{{ value }}</td>
+            <td>{% if value is number %}{{ value|int }}{% else %}{{ value }}{% endif %}</td>
             {% endfor %}
         </tr>
         {% endfor %}

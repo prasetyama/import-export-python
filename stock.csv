@@ -1,4 +1,4 @@
-random_col, SKU ,  Stock Pcs,  Junk, Kode Gudang
-ignore,   ITEM-018,  90,       xxx,  WH-J
-ignore,   ITEM-020,  100,       zzz,  WH-C
-ignore,   ITEM-019,  10,       yyy,  12345
+random_col,  Stock Pcs,  Junk, Kode Gudang, distributor_id, SKU 
+ignore,  100,       xxx,  WH-J,23423,ITEM-028
+ignore,  200,       zzz,  WH-C,23432,ITEM-029
+ignore,  300,       yyy,  12345,23423,ITEM-030

@@ -97,7 +97,7 @@ def import_data(filename):
             cursor.close()
             connection.close()
 
-def get_column_configs():
+def get_column_configs(table_name='stocks'):
     """Fetches column definitions and aliases from the database."""
     connection = get_connection()
     if not connection:
@@ -107,7 +107,8 @@ def get_column_configs():
         cursor = connection.cursor(dictionary=True)
         
         # Get Definitions
-        cursor.execute("SELECT * FROM column_definitions")
+        query = "SELECT * FROM column_definitions WHERE table_name = %s"
+        cursor.execute(query, (table_name,))
         definitions = cursor.fetchall()
         
         # Get Aliases
@@ -115,7 +116,8 @@ def get_column_configs():
             SELECT ca.id, ca.alias_name, cd.column_name 
             FROM column_aliases ca
             JOIN column_definitions cd ON ca.column_id = cd.id
-        """)
+            WHERE cd.table_name = %s
+        """, (table_name,))
         aliases = cursor.fetchall()
         
         config = {}
@@ -380,3 +382,201 @@ def import_stock_data(filename):
             if cursor:
                 cursor.close()
             connection.close()
+
+def import_sales_data(filename):
+    """Imports sales data using dynamic configuration from database."""
+    if not os.path.exists(filename):
+        return False, ["File not found."]
+
+    # Load Config from DB
+    configs = get_column_configs(table_name='sales')
+    if not configs:
+        return False, ["Failed to load sales column configurations from database."]
+
+    connection = get_connection()
+    if not connection:
+        return False, ["Database connection failed."]
+
+    cursor = None
+    try:
+        # 1. Read File
+        if filename.endswith('.csv') or filename.endswith('.txt'):
+             # Use sep=None and engine='python' to auto-detect ',' or ';'
+            df = pd.read_csv(filename, sep=None, engine='python')
+        elif filename.endswith('.xlsx') or filename.endswith('.xls'):
+            df = pd.read_excel(filename)
+        else:
+            return False, ["Unsupported file format."]
+
+        # 2. Normalize Headers
+        df.columns = [str(col).strip().lower() for col in df.columns]
+
+        # 3. Map Columns using Dynamic Config
+        final_columns = {}
+        missing_columns = []
+        
+        # Build mapping dict from config
+        column_mapping = { name: conf['aliases'] for name, conf in configs.items() }
+
+        for key, possible_names in column_mapping.items():
+            found = False
+            for name in possible_names:
+                if name in df.columns:
+                    final_columns[key] = name
+                    found = True
+                    break
+            if not found:
+                missing_columns.append(key)
+        
+        # Check Mandatory Columns
+        missing_required = []
+        for col_key in missing_columns:
+            if configs[col_key]['is_mandatory']:
+                missing_required.append(col_key)
+
+        if missing_required:
+            return False, [f"Missing mandatory columns: {', '.join(missing_required)}"]
+
+        # 4. Validation & Insertion
+        cursor = connection.cursor()
+        success_count = 0
+        errors = []
+
+        # Correct columns for sales table
+        insert_query = """
+            INSERT INTO sales (
+                dist_id, date, salesman, sku, re_pcs, do_ocs, rj_pcs, 
+                amount_jual, amount_std, amount_trd, 
+                disc_add, disc_prod, disc_po, disc_bonus
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """
+
+        data_to_insert = []
+        
+        for index, row in df.iterrows():
+            row_errors = []
+            
+            # Helper to safely get value (whether by name or index)
+            def get_val(key):
+                col_ref = final_columns.get(key)
+                if col_ref is not None:
+                    # if col_ref is integer (index) or string (name)
+                    if isinstance(col_ref, int):
+                         return row.iloc[col_ref]
+                    return row[col_ref]
+                return None
+
+            # Get values for all sales columns
+            vals = {}
+            for col in ['dist_id', 'date', 'salesman', 'sku', 're_pcs', 'do_ocs', 'rj_pcs', 
+                        'amount_jual', 'amount_std', 'amount_trd', 
+                        'disc_add', 'disc_prod', 'disc_po', 'disc_bonus']:
+                vals[col] = get_val(col)
+
+            # Dynamic Row-Level Validation
+            for key in configs:
+                conf = configs[key]
+                val = vals.get(key)
+                
+                # Check Mandatory
+                if conf['is_mandatory']:
+                    if pd.isna(val) or str(val).strip() == '':
+                         row_errors.append(f"Row {index+1}: {key} is missing.")
+                         continue
+
+                # Check Data Type (Basic)
+                if pd.notna(val) and str(val).strip() != '':
+                    if conf['data_type'] == 'int':
+                        try:
+                            int(float(val)) # float first to handle 10.0
+                        except ValueError:
+                            row_errors.append(f"Row {index+1}: {key} must be an integer.")
+                    elif conf['data_type'] == 'date':
+                        try:
+                             pd.to_datetime(val, dayfirst=False, errors='raise')
+                        except ValueError:
+                             try:
+                                 pd.to_datetime(val, dayfirst=True, errors='raise')
+                             except:
+                                 row_errors.append(f"Row {index+1}: {key} invalid date format.")
+
+            if row_errors:
+                errors.extend(row_errors)
+                continue
+
+            # Final Data Clean-up
+            try:
+                # Helper for clean int
+                def clean_int(v):
+                    return int(float(v)) if pd.notna(v) and str(v).strip() != '' else 0
+                
+                # Helper for clean decimal/float
+                def clean_float(v):
+                     return float(v) if pd.notna(v) and str(v).strip() != '' else 0.0
+
+                dist_id = clean_int(vals['dist_id'])
+                re_pcs = clean_int(vals['re_pcs'])
+                do_ocs = clean_int(vals['do_ocs'])
+                rj_pcs = clean_int(vals['rj_pcs'])
+                
+                amount_jual = clean_int(vals['amount_jual'])
+                amount_std = clean_int(vals['amount_std'])
+                amount_trd = clean_int(vals['amount_trd'])
+                disc_add = clean_int(vals['disc_add'])
+                disc_prod = clean_int(vals['disc_prod'])
+                disc_po = clean_int(vals['disc_po'])
+                disc_bonus = clean_int(vals['disc_bonus'])
+
+                sku = str(vals['sku']) if pd.notna(vals['sku']) else ''
+                salesman = str(vals['salesman']) if pd.notna(vals['salesman']) else ''
+                
+                date_val = vals['date']
+                if pd.isna(date_val) or str(date_val).strip() == '':
+                    date_val = None
+                else:
+                    try:
+                        parsed = pd.to_datetime(date_val, dayfirst=False)
+                        date_val = parsed.strftime('%Y-%m-%d')
+                    except:
+                         parsed = pd.to_datetime(date_val, dayfirst=True)
+                         date_val = parsed.strftime('%Y-%m-%d')
+
+                data_to_insert.append((
+                    dist_id, date_val, salesman, sku, re_pcs, do_ocs, rj_pcs,
+                    amount_jual, amount_std, amount_trd,
+                    disc_add, disc_prod, disc_po, disc_bonus
+                ))
+            except Exception as e:
+                row_errors.append(f"Row {index+1}: Data conversion error {str(e)}")
+                errors.extend(row_errors)
+                continue
+
+        if data_to_insert:
+            cursor.executemany(insert_query, data_to_insert)
+            connection.commit()
+            success_count = cursor.rowcount
+
+        return True, {
+            "success_count": len(data_to_insert),
+            "errors": errors
+        }
+
+    except Exception as e:
+        return False, [f"System Error: {str(e)}"]
+    finally:
+        if connection and connection.is_connected():
+            if cursor:
+                cursor.close()
+            connection.close()
+
+def import_file_process(filename):
+    """Detects file type based on name and calls appropriate import function."""
+    base_name = os.path.basename(filename).lower()
+    
+    if base_name == 'pv_inventory.csv':
+        return import_stock_data(filename)
+    elif base_name == 'pv_salesunion.csv':
+        return import_sales_data(filename)
+    else:
+        return False, ["Filename does not match expected import types."]
