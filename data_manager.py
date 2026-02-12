@@ -141,6 +141,20 @@ def get_column_configs(table_name='stocks'):
             cursor.close()
             connection.close()
 
+def get_import_tables():
+    """Fetches list of available import tables."""
+    connection = get_connection()
+    if not connection: return []
+    try:
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM import_tables")
+        tables = cursor.fetchall()
+        return tables
+    finally:
+        if connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+
 def update_column_config(column_id, is_mandatory, data_type):
     """Updates configuration for a column."""
     connection = get_connection()
@@ -192,6 +206,91 @@ def delete_alias(alias_id):
         return True
     except Error as e:
         print(f"Error deleting alias: {e}")
+        return False
+    finally:
+        if connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+
+def create_new_import_table(table_name, display_name, initial_columns):
+    """
+    Creates a new import table dynamically.
+    initial_columns: list of dicts {'name': 'col_name', 'type': 'str'|'int'|'date'}
+    """
+    connection = get_connection()
+    if not connection: return False
+    
+    try:
+        cursor = connection.cursor()
+        
+        # 1. Register in import_tables
+        cursor.execute(
+            "INSERT INTO import_tables (table_name, display_name) VALUES (%s, %s)",
+            (table_name, display_name)
+        )
+        
+        # 2. Create physical table
+        col_defs = ["id INT AUTO_INCREMENT PRIMARY KEY"]
+        for col in initial_columns:
+            dtype = "VARCHAR(255)"
+            default = "DEFAULT ''"
+            if col['type'] == 'int':
+                dtype = "INT"
+                default = "DEFAULT 0"
+            elif col['type'] == 'date':
+                dtype = "DATE"
+                default = "NULL"
+            
+            col_defs.append(f"{col['name']} {dtype} {default}")
+            
+        create_sql = f"CREATE TABLE {table_name} ({', '.join(col_defs)})"
+        cursor.execute(create_sql)
+        
+        # 3. Register columns in column_definitions
+        for col in initial_columns:
+            cursor.execute(
+                "INSERT INTO column_definitions (table_name, column_name, is_mandatory, data_type) VALUES (%s, %s, %s, %s)",
+                (table_name, col['name'], True, col['type'])
+            )
+            
+        connection.commit()
+        return True
+    except Error as e:
+        print(f"Error creating table: {e}")
+        return False
+    finally:
+        if connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+
+def add_column_to_table(table_name, column_name, data_type):
+    """Adds a new column to an existing import table."""
+    connection = get_connection()
+    if not connection: return False
+    
+    try:
+        cursor = connection.cursor()
+        
+        # 1. Alter physical table
+        dtype_sql = "VARCHAR(255) DEFAULT ''"
+        if data_type == 'int':
+            dtype_sql = "INT DEFAULT 0"
+        elif data_type == 'date':
+            dtype_sql = "DATE NULL"
+            
+        alter_sql = f"ALTER TABLE {table_name} ADD COLUMN {column_name} {dtype_sql}"
+        cursor.execute(alter_sql)
+        
+        # 2. Register in column_definitions
+        cursor.execute(
+            "INSERT INTO column_definitions (table_name, column_name, is_mandatory, data_type) VALUES (%s, %s, %s, %s)",
+            (table_name, column_name, False, data_type)
+        )
+        
+        connection.commit()
+        return True
+    except Error as e:
+        print(f"Error adding column: {e}")
         return False
     finally:
         if connection and connection.is_connected():
@@ -445,7 +544,7 @@ def import_sales_data(filename):
         # Correct columns for sales table
         insert_query = """
             INSERT INTO sales (
-                dist_id, date, salesman, sku, re_pcs, do_ocs, rj_pcs, 
+                dist_id, date, salesman, sku, re_pcs, do_pcs, rj_pcs, 
                 amount_jual, amount_std, amount_trd, 
                 disc_add, disc_prod, disc_po, disc_bonus
             )
@@ -469,7 +568,7 @@ def import_sales_data(filename):
 
             # Get values for all sales columns
             vals = {}
-            for col in ['dist_id', 'date', 'salesman', 'sku', 're_pcs', 'do_ocs', 'rj_pcs', 
+            for col in ['dist_id', 'date', 'salesman', 'sku', 're_pcs', 'do_pcs', 'rj_pcs', 
                         'amount_jual', 'amount_std', 'amount_trd', 
                         'disc_add', 'disc_prod', 'disc_po', 'disc_bonus']:
                 vals[col] = get_val(col)
@@ -517,7 +616,7 @@ def import_sales_data(filename):
 
                 dist_id = clean_int(vals['dist_id'])
                 re_pcs = clean_int(vals['re_pcs'])
-                do_ocs = clean_int(vals['do_ocs'])
+                do_pcs = clean_int(vals['do_pcs'])
                 rj_pcs = clean_int(vals['rj_pcs'])
                 
                 amount_jual = clean_int(vals['amount_jual'])
@@ -543,7 +642,7 @@ def import_sales_data(filename):
                          date_val = parsed.strftime('%Y-%m-%d')
 
                 data_to_insert.append((
-                    dist_id, date_val, salesman, sku, re_pcs, do_ocs, rj_pcs,
+                    dist_id, date_val, salesman, sku, re_pcs, do_pcs, rj_pcs,
                     amount_jual, amount_std, amount_trd,
                     disc_add, disc_prod, disc_po, disc_bonus
                 ))
@@ -561,6 +660,149 @@ def import_sales_data(filename):
             "success_count": len(data_to_insert),
             "errors": errors
         }
+
+    except Exception as e:
+        return False, [f"System Error: {str(e)}"]
+    finally:
+        if connection and connection.is_connected():
+            if cursor:
+                cursor.close()
+            connection.close()
+
+def import_dynamic_data(filename, table_name):
+    """
+    Generic import function for any configured table.
+    """
+    if not os.path.exists(filename):
+        return False, ["File not found."]
+
+    # Load Config from DB
+    configs = get_column_configs(table_name=table_name)
+    if not configs:
+        return False, [f"Failed to load configuration for table {table_name}."]
+
+    connection = get_connection()
+    if not connection:
+        return False, ["Database connection failed."]
+
+    cursor = None
+    try:
+        # 1. Read File
+        if filename.endswith('.csv') or filename.endswith('.txt'):
+            df = pd.read_csv(filename, sep=None, engine='python')
+        elif filename.endswith('.xlsx') or filename.endswith('.xls'):
+            df = pd.read_excel(filename)
+        else:
+            return False, ["Unsupported file format."]
+
+        # 2. Normalize Headers
+        df.columns = [str(col).strip().lower() for col in df.columns]
+
+        # 3. Map Columns
+        final_columns = {}
+        missing_columns = []
+        column_mapping = { name: conf['aliases'] for name, conf in configs.items() }
+
+        for key, possible_names in column_mapping.items():
+            found = False
+            for name in possible_names:
+                if name in df.columns:
+                    final_columns[key] = name
+                    found = True
+                    break
+            if not found:
+                missing_columns.append(key)
+        
+        # Check Mandatory
+        missing_required = []
+        for col_key in missing_columns:
+            if configs[col_key]['is_mandatory']:
+                missing_required.append(col_key)
+
+        if missing_required:
+            return False, [f"Missing mandatory columns: {', '.join(missing_required)}"]
+
+        # 4. Prepare SQL
+        cursor = connection.cursor()
+        
+        # Get actual columns to insert (configured keys)
+        insert_keys = list(configs.keys())
+        placeholders = ', '.join(['%s'] * len(insert_keys))
+        columns_sql = ', '.join(insert_keys)
+        
+        insert_query = f"INSERT INTO {table_name} ({columns_sql}) VALUES ({placeholders})"
+
+        data_to_insert = []
+        errors = []
+        
+        for index, row in df.iterrows():
+            row_vals = []
+            row_valid = True
+            row_errors = []
+            
+            for key in insert_keys:
+                conf = configs[key]
+                col_ref = final_columns.get(key)
+                
+                val = None
+                if col_ref is not None:
+                    if isinstance(col_ref, int):
+                         val = row.iloc[col_ref]
+                    else:
+                         val = row[col_ref]
+
+                # Validation & Cleaning
+                clean_val = None
+                
+                # Check Mandatory
+                if conf['is_mandatory']:
+                     if pd.isna(val) or str(val).strip() == '':
+                         row_errors.append(f"Row {index+1}: {key} is missing.")
+                         row_valid = False
+                         
+                if not row_valid: break
+
+                if pd.notna(val) and str(val).strip() != '':
+                    try:
+                        if conf['data_type'] == 'int':
+                            clean_val = int(float(val))
+                        elif conf['data_type'] == 'date':
+                            try:
+                                parsed = pd.to_datetime(val, dayfirst=False)
+                                clean_val = parsed.strftime('%Y-%m-%d')
+                            except:
+                                parsed = pd.to_datetime(val, dayfirst=True)
+                                clean_val = parsed.strftime('%Y-%m-%d')
+                        else:
+                            clean_val = str(val)
+                    except ValueError:
+                         row_errors.append(f"Row {index+1}: Invalid value for {key} ({val})")
+                         row_valid = False
+                else:
+                    # Default values for missing/empty
+                    if conf['data_type'] == 'int':
+                        clean_val = 0
+                    elif conf['data_type'] == 'date':
+                        clean_val = None
+                    else:
+                        clean_val = ''
+                
+                row_vals.append(clean_val)
+            
+            if row_errors:
+                errors.extend(row_errors)
+                continue
+                
+            if row_valid:
+                data_to_insert.append(tuple(row_vals))
+
+        if data_to_insert:
+            cursor.executemany(insert_query, data_to_insert)
+            connection.commit()
+            success_count = cursor.rowcount
+            return True, {"success_count": success_count, "errors": errors}
+        else:
+            return False, errors + ["No valid rows to insert."]
 
     except Exception as e:
         return False, [f"System Error: {str(e)}"]

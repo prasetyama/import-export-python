@@ -6,14 +6,20 @@
     <a href="{{ url_for('index') }}" class="button">Back to Home</a>
 </div>
 
-<div style="margin-bottom: 20px;">
+<div style="margin-bottom: 20px; width: 350px;">
     <strong>Configure:</strong>
-    <a href="{{ url_for('config_page', table='stocks') }}" class="button">
-        Stocks
-    </a>
-    <a href="{{ url_for('config_page', table='sales') }}" class="button">
-        Sales
-    </a>
+    <table>
+        <tr>
+            {% for table in tables %}
+            <td style="{% if current_table == table.table_name %}background-color: #007bff;{% endif %}">
+                <a href="{{ url_for('config_page', table=table.table_name) }}" class="button"
+                    style="{% if current_table == table.table_name %}color: white;{% endif %}">
+                    {{ table.display_name }}
+                </a>
+            </td>
+            {% endfor %}
+        </tr>
+    </table>
 </div>
 
 <div class="card">

@@ -13,17 +13,26 @@
     <div style="margin-top: 15px;">
         <strong>Import Data:</strong>
         <form action="{{ url_for('import_file') }}" method="post" enctype="multipart/form-data"
-            style="display: inline-block;">
-            <input type="file" name="file" accept=".csv, .xlsx, .xls" required>
-            <button type="submit" class="btn btn-primary" style="background-color: #6f42c1;">Upload File</button>
+            style="margin-top: 5px;">
+            <div style="margin-bottom: 10px;">
+                <label for="table_select">Import Target:</label>
+                <select name="table_name" id="table_select" style="padding: 5px; margin-right: 10px;">
+                    <option value="auto">Auto-detect (Filename)</option>
+                    {% if tables %}
+                    {% for table in tables %}
+                    <option value="{{ table.table_name }}">{{ table.display_name }}</option>
+                    {% endfor %}
+                    {% endif %}
+                </select>
+            </div>
+            <div>
+                <input type="file" name="file" accept=".csv, .xlsx, .xls" required>
+                <button type="submit" class="btn btn-primary" style="background-color: #6f42c1;">Upload File</button>
+            </div>
         </form>
-        <div style="margin-top:5px; color: #666; font-size: 0.9em;">
-            <p style="margin: 2px 0;"><strong>Instructions:</strong></p>
-            <ul style="margin: 2px 0; padding-left: 20px;">
-                <li>For <strong>Stock</strong> import: Filename must be "PV_INVENTORY" (e.g., <em>PV_INVENTORY.csv</em>)</li>
-                <li>For <strong>Sales</strong> import: Filename must be "PV_SALESUNION" (e.g., <em>PV_SALESUNION.xlsx</em>)
-                </li>
-            </ul>
+        <div style="margin-top:10px; color: #666; font-size: 0.9em;">
+            <p style="margin: 2px 0;"><strong>Note:</strong> Select specific table or use "Auto-detect" for standard
+                files.</p>
         </div>
     </div>
 </div>

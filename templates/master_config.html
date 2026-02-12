@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Master Configuration</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            margin: 20px;
+        }
+
+        h1,
+        h2,
+        h3 {
+            color: #333;
+        }
+
+        .section {
+            margin-bottom: 30px;
+            border: 1px solid #ccc;
+            padding: 20px;
+            border-radius: 5px;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+
+        input[type="text"],
+        select {
+            width: 100%;
+            padding: 8px;
+            box-sizing: border-box;
+        }
+
+        button {
+            padding: 10px 15px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+            border-radius: 3px;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+
+        th,
+        td {
+            padding: 10px;
+            border: 1px solid #ddd;
+            text-align: left;
+        }
+
+        th {
+            background-color: #f4f4f4;
+        }
+
+        .nav-link {
+            display: inline-block;
+            margin-right: 15px;
+            text-decoration: none;
+            color: #007bff;
+        }
+
+        .nav-link:hover {
+            text-decoration: underline;
+        }
+
+        .message {
+            padding: 10px;
+            margin-bottom: 20px;
+            border-radius: 4px;
+        }
+
+        .success {
+            background-color: #d4edda;
+            color: #155724;
+        }
+
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+
+        .column-row {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+            align-items: center;
+        }
+
+        .remove-col {
+            background-color: #dc3545;
+        }
+
+        .remove-col:hover {
+            background-color: #c82333;
+        }
+    </style>
+</head>
+
+<body>
+    <div style="margin-bottom: 20px;">
+        <a href="/" class="nav-link">Home</a>
+        <a href="/config" class="nav-link">Column Config</a>
+        <a href="/master-config" class="nav-link" style="font-weight: bold;">Master Config</a>
+    </div>
+
+    <h1>Master Configuration</h1>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    {% for category, message in messages %}
+    <div class="message {{ category }}">{{ message }}</div>
+    {% endfor %}
+    {% endif %}
+    {% endwith %}
+
+    <div class="section">
+        <h2>Create New Import Table</h2>
+        <form action="/config/add-table" method="POST">
+            <div class="form-group">
+                <label for="display_name">Display Name (e.g., "Products")</label>
+                <input type="text" id="display_name" name="display_name" required>
+            </div>
+            <div class="form-group">
+                <label for="table_name">Table Name (DB) (e.g., "products")</label>
+                <input type="text" id="table_name" name="table_name" pattern="[a-zA-Z0-9_]+"
+                    title="Alphanumeric and underscores only" required>
+                <small>Use only letters, numbers, and underscores.</small>
+            </div>
+
+            <h3>Initial Columns</h3>
+            <div id="column-container">
+                <div class="column-row">
+                    <input type="text" name="col_name[]" placeholder="Column Name (e.g. sku)" required>
+                    <select name="col_type[]">
+                        <option value="str">String (Text)</option>
+                        <option value="int">Integer (Number)</option>
+                        <option value="date">Date</option>
+                    </select>
+                </div>
+            </div>
+            <button type="button" onclick="addColumnRow()" style="background-color: #28a745; margin-bottom: 10px;">+ Add
+                Another Column</button>
+            <br>
+            <button type="submit">Create Table</button>
+        </form>
+    </div>
+
+    <div class="section">
+        <h2>Existing Import Tables</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Display Name</th>
+                    <th>Table Name</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for table in tables %}
+                <tr>
+                    <td>{{ table.id }}</td>
+                    <td>{{ table.display_name }}</td>
+                    <td>{{ table.table_name }}</td>
+                    <td>
+                        <a href="/config?table={{ table.table_name }}">Manage Columns</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="section">
+        <h2>Add Column to Existing Table</h2>
+        <form action="/config/add-column" method="POST">
+            <div class="form-group">
+                <label for="target_table">Select Table</label>
+                <select id="target_table" name="table_name" required>
+                    {% for table in tables %}
+                    <option value="{{ table.table_name }}">{{ table.display_name }} ({{ table.table_name }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="new_column_name">New Column Name</label>
+                <input type="text" id="new_column_name" name="column_name" pattern="[a-zA-Z0-9_]+" required>
+            </div>
+            <div class="form-group">
+                <label for="new_column_type">Data Type</label>
+                <select id="new_column_type" name="data_type">
+                    <option value="str">String</option>
+                    <option value="int">Integer</option>
+                    <option value="date">Date</option>
+                </select>
+            </div>
+            <button type="submit">Add Column</button>
+        </form>
+    </div>
+
+    <script>
+        function addColumnRow() {
+            const container = document.getElementById('column-container');
+            const newRow = document.createElement('div');
+            newRow.className = 'column-row';
+            newRow.innerHTML = `
+                <input type="text" name="col_name[]" placeholder="Column Name" required>
+                <select name="col_type[]">
+                    <option value="str">String</option>
+                    <option value="int">Integer</option>
+                    <option value="date">Date</option>
+                </select>
+                <button type="button" class="remove-col" onclick="this.parentElement.remove()">X</button>
+            `;
+            container.appendChild(newRow);
+        }
+    </script>
+</body>
+
+</html>

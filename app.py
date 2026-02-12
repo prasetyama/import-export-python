@@ -17,8 +17,9 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 def config_page():
     # Default to stocks if not provided
     current_table = request.args.get('table', 'stocks')
+    tables = data_manager.get_import_tables()
     configs = data_manager.get_column_configs(table_name=current_table)
-    return render_template('config.html', configs=configs, current_table=current_table)
+    return render_template('config.html', configs=configs, current_table=current_table, tables=tables)
 
 @app.route('/config/update', methods=['POST'])
 def update_config():
@@ -57,6 +58,44 @@ def delete_alias(alias_id):
         flash("Failed to delete alias.", "error")
     return redirect(request.referrer or url_for('config_page'))
 
+@app.route('/master-config')
+def master_config():
+    tables = data_manager.get_import_tables()
+    return render_template('master_config.html', tables=tables)
+
+@app.route('/config/add-table', methods=['POST'])
+def add_table():
+    display_name = request.form.get('display_name')
+    table_name = request.form.get('table_name')
+    
+    col_names = request.form.getlist('col_name[]')
+    col_types = request.form.getlist('col_type[]')
+    
+    initial_columns = []
+    for name, dtype in zip(col_names, col_types):
+        if name and name.strip():
+            initial_columns.append({'name': name.strip(), 'type': dtype})
+            
+    if data_manager.create_new_import_table(table_name, display_name, initial_columns):
+        flash(f"Table '{display_name}' created successfully.", "success")
+    else:
+        flash("Failed to create table. Name might be duplicate.", "error")
+        
+    return redirect(url_for('master_config'))
+
+@app.route('/config/add-column', methods=['POST'])
+def add_column():
+    table_name = request.form.get('table_name')
+    column_name = request.form.get('column_name')
+    data_type = request.form.get('data_type')
+    
+    if data_manager.add_column_to_table(table_name, column_name, data_type):
+        flash(f"Column '{column_name}' added to {table_name}.", "success")
+    else:
+        flash("Failed to add column.", "error")
+        
+    return redirect(url_for('master_config'))
+
 @app.route('/')
 def index():
     conn = data_manager.get_connection()
@@ -73,7 +112,8 @@ def index():
     else:
         flash("Could not connect to database.")
     
-    return render_template('index.html', data=data)
+    import_tables = data_manager.get_import_tables()
+    return render_template('index.html', data=data, tables=import_tables)
 
 @app.route('/import', methods=['POST'])
 def import_file():
@@ -91,9 +131,14 @@ def import_file():
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
         
-        # Determine import type based on filename
-        # This function handles routing to stock or sales import
-        result, messages = data_manager.import_file_process(filepath)
+        # Determine import type based on filename OR selection
+        table_name = request.form.get('table_name')
+        
+        if table_name and table_name != 'auto':
+             result, messages = data_manager.import_dynamic_data(filepath, table_name)
+        else:
+             # Fallback to auto-detection
+             result, messages = data_manager.import_file_process(filepath)
         
         if result:
              # messages is a dict with success_count and errors
