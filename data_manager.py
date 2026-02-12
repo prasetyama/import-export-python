@@ -212,10 +212,31 @@ def delete_alias(alias_id):
             cursor.close()
             connection.close()
 
-def create_new_import_table(table_name, display_name, initial_columns):
+def update_allowed_filename(table_id, allowed_filename):
+    """Updates the allowed_filename for an import table."""
+    connection = get_connection()
+    if not connection: return False
+    try:
+        cursor = connection.cursor()
+        cursor.execute(
+            "UPDATE import_tables SET allowed_filename = %s WHERE id = %s",
+            (allowed_filename.strip().lower(), table_id)
+        )
+        connection.commit()
+        return True
+    except Error as e:
+        print(f"Error updating allowed filename: {e}")
+        return False
+    finally:
+        if connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+
+def create_new_import_table(table_name, display_name, initial_columns, allowed_filename=''):
     """
     Creates a new import table dynamically.
     initial_columns: list of dicts {'name': 'col_name', 'type': 'str'|'int'|'date'}
+    allowed_filename: expected filename for auto-detect import
     """
     connection = get_connection()
     if not connection: return False
@@ -225,8 +246,8 @@ def create_new_import_table(table_name, display_name, initial_columns):
         
         # 1. Register in import_tables
         cursor.execute(
-            "INSERT INTO import_tables (table_name, display_name) VALUES (%s, %s)",
-            (table_name, display_name)
+            "INSERT INTO import_tables (table_name, display_name, allowed_filename) VALUES (%s, %s, %s)",
+            (table_name, display_name, allowed_filename.strip().lower())
         )
         
         # 2. Create physical table
@@ -813,12 +834,37 @@ def import_dynamic_data(filename, table_name):
             connection.close()
 
 def import_file_process(filename):
-    """Detects file type based on name and calls appropriate import function."""
-    base_name = os.path.basename(filename).lower()
+    """Detects file type based on name and calls appropriate import function using dynamic config."""
+    base_name = os.path.basename(filename)
+    name_only, extension = os.path.splitext(base_name)
+    name_only_lower = name_only.lower()
+    extension_lower = extension.lower()
     
-    if base_name == 'pv_inventory.csv':
-        return import_stock_data(filename)
-    elif base_name == 'pv_salesunion.csv':
-        return import_sales_data(filename)
-    else:
-        return False, ["Filename does not match expected import types."]
+    # 1. Extension Validation (only .csv and .txt allowed)
+    allowed_extensions = ['.csv', '.txt']
+    if extension_lower not in allowed_extensions:
+        return False, [f"Unsupported file extension '{extension}'. Only {', '.join(allowed_extensions)} are allowed."]
+
+    # Dynamic lookup: check allowed_filename in import_tables
+    connection = get_connection()
+    if not connection:
+        return False, ["Database connection failed."]
+    
+    try:
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute("SELECT table_name, allowed_filename FROM import_tables WHERE allowed_filename != ''")
+        tables = cursor.fetchall()
+        
+        for table in tables:
+            allowed = table['allowed_filename'].strip().lower()
+            # 2. Match filename without extension
+            if allowed and allowed == name_only_lower:
+                return import_dynamic_data(filename, table['table_name'])
+        
+        return False, [f"Filename '{name_only}' does not match any configured import table. Please set the allowed filename in Master Config or select the target table manually."]
+    except Error as e:
+        return False, [f"Error during auto-detect: {str(e)}"]
+    finally:
+        if connection and connection.is_connected():
+            cursor.close()
+            connection.close()

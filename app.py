@@ -67,6 +67,7 @@ def master_config():
 def add_table():
     display_name = request.form.get('display_name')
     table_name = request.form.get('table_name')
+    allowed_filename = request.form.get('allowed_filename', '')
     
     col_names = request.form.getlist('col_name[]')
     col_types = request.form.getlist('col_type[]')
@@ -76,11 +77,22 @@ def add_table():
         if name and name.strip():
             initial_columns.append({'name': name.strip(), 'type': dtype})
             
-    if data_manager.create_new_import_table(table_name, display_name, initial_columns):
+    if data_manager.create_new_import_table(table_name, display_name, initial_columns, allowed_filename):
         flash(f"Table '{display_name}' created successfully.", "success")
     else:
         flash("Failed to create table. Name might be duplicate.", "error")
         
+    return redirect(url_for('master_config'))
+
+@app.route('/config/update-filename', methods=['POST'])
+def update_filename():
+    table_id = request.form.get('table_id')
+    allowed_filename = request.form.get('allowed_filename', '')
+    
+    if data_manager.update_allowed_filename(table_id, allowed_filename):
+        flash("Allowed filename updated.", "success")
+    else:
+        flash("Failed to update allowed filename.", "error")
     return redirect(url_for('master_config'))
 
 @app.route('/config/add-column', methods=['POST'])

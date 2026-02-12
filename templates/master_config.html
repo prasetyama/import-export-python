@@ -145,6 +145,12 @@
                     title="Alphanumeric and underscores only" required>
                 <small>Use only letters, numbers, and underscores.</small>
             </div>
+            <div class="form-group">
+                <label for="allowed_filename">Allowed Filename (for auto-detect import)</label>
+                <input type="text" id="allowed_filename" name="allowed_filename" placeholder="e.g. pv_inventory.csv">
+                <small>The uploaded filename must contain this value to auto-detect. Leave empty to disable auto-detect
+                    for this table.</small>
+            </div>
 
             <h3>Initial Columns</h3>
             <div id="column-container">
@@ -172,6 +178,7 @@
                     <th>ID</th>
                     <th>Display Name</th>
                     <th>Table Name</th>
+                    <th>Allowed Filename</th>
                     <th>Actions</th>
                 </tr>
             </thead>
@@ -181,8 +188,16 @@
                     <td>{{ table.id }}</td>
                     <td>{{ table.display_name }}</td>
                     <td>{{ table.table_name }}</td>
-                    <td>
-                        <a href="/config?table={{ table.table_name }}">Manage Columns</a>
+                    <td colspan="2">
+                        <form action="/config/update-filename" method="POST"
+                            style="display: flex; gap: 5px; align-items: center;">
+                            <input type="hidden" name="table_id" value="{{ table.id }}">
+                            <input type="text" name="allowed_filename" value="{{ table.allowed_filename or '' }}"
+                                placeholder="e.g. pv_inventory.csv"
+                                style="padding: 5px; border: 1px solid #ccc; border-radius: 3px; flex: 1;">
+                            <button type="submit" style="padding: 5px 10px; font-size: 0.85em;">Save</button>
+                            <a href="/config?table={{ table.table_name }}" style="margin-left: 5px;">Manage Columns</a>
+                        </form>
                     </td>
                 </tr>
                 {% endfor %}
