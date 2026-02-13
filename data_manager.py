@@ -692,10 +692,20 @@ def import_sales_data(filename):
 
 def import_dynamic_data(filename, table_name):
     """
-    Generic import function for any configured table.
+    Generic import function for any configured table with filename validation.
     """
     if not os.path.exists(filename):
         return False, ["File not found."]
+
+    base_name = os.path.basename(filename)
+    name_only, extension = os.path.splitext(base_name)
+    name_only_lower = name_only.lower()
+    extension_lower = extension.lower()
+
+    # 1. Extension Validation
+    allowed_extensions = ['.csv', '.txt']
+    if extension_lower not in allowed_extensions:
+        return False, [f"Unsupported file extension '{extension}'. Only {', '.join(allowed_extensions)} are allowed."]
 
     # Load Config from DB
     configs = get_column_configs(table_name=table_name)
@@ -708,7 +718,17 @@ def import_dynamic_data(filename, table_name):
 
     cursor = None
     try:
-        # 1. Read File
+        cursor = connection.cursor(dictionary=True)
+        # 2. Filename Validation against Table Config
+        cursor.execute("SELECT allowed_filename FROM import_tables WHERE table_name = %s", (table_name,))
+        table_info = cursor.fetchone()
+        
+        if table_info and table_info['allowed_filename']:
+            allowed = table_info['allowed_filename'].strip().lower()
+            if allowed != name_only_lower:
+                return False, [f"Filename '{name_only}' does not match the configured allowed filename for table '{table_name}'. Expected: '{allowed}'"]
+
+        # 3. Read File
         if filename.endswith('.csv') or filename.endswith('.txt'):
             df = pd.read_csv(filename, sep=None, engine='python')
         elif filename.endswith('.xlsx') or filename.endswith('.xls'):
