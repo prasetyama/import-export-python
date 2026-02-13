@@ -138,9 +138,11 @@ def import_file():
 
     table_name = request.form.get('table_name', 'auto')
     all_file_paths = []
-    temp_dirs = []  # track temp dirs for cleanup
+    temp_dirs = []
+    warnings = []
 
     try:
+        # ========== Step 1: Simpan file & extract ZIP (sama seperti API) ==========
         for file in files:
             if file.filename == '':
                 continue
@@ -152,7 +154,6 @@ def import_file():
             _, ext = os.path.splitext(filename)
 
             if ext.lower() == '.zip':
-                # Extract ZIP to temp directory
                 temp_dir = os.path.join(app.config['UPLOAD_FOLDER'], f'_zip_{os.path.splitext(filename)[0]}')
                 os.makedirs(temp_dir, exist_ok=True)
                 temp_dirs.append(temp_dir)
@@ -161,9 +162,10 @@ def import_file():
                 if extracted:
                     all_file_paths.extend(extracted)
                 else:
-                    flash(f"⚠️ {filename}: Invalid ZIP file or no data files (.csv/.txt) found inside.")
+                    msg = f"{filename}: Invalid ZIP or no data files found inside."
+                    warnings.append(msg)
+                    flash(f"⚠️ {msg}")
 
-                # Remove the zip file itself
                 try:
                     os.remove(filepath)
                 except:
@@ -171,7 +173,9 @@ def import_file():
             elif ext.lower() in ['.csv', '.txt']:
                 all_file_paths.append(filepath)
             else:
-                flash(f"⚠️ {filename}: Unsupported file type '{ext}'. Skipped.")
+                msg = f"{filename}: Unsupported file type '{ext}'. Skipped."
+                warnings.append(msg)
+                flash(f"⚠️ {msg}")
                 try:
                     os.remove(filepath)
                 except:
@@ -181,27 +185,70 @@ def import_file():
             flash('No valid data files to process.')
             return redirect(url_for('index'))
 
-        # Process all collected files
-        results = data_manager.import_multiple_files(all_file_paths, table_name)
+        # ========== Step 2: Quick validate (sama seperti API) ==========
+        validation_results = []
+        valid_files = []
+        total_rows = 0
 
-        # Flash results per file
-        success_total = 0
-        fail_total = 0
-        for r in results:
-            if r['success']:
-                success_total += 1
-                flash(f"✅ {r['filename']}: {r['message']}")
-                if r.get('errors'):
-                    for err in r['errors']:
-                        flash(f"⚠️ {r['filename']}: {err}")
+        for fp in all_file_paths:
+            fname = os.path.basename(fp)
+            is_valid, error_msg, row_count = data_manager.quick_validate_file(fp, table_name)
+            if is_valid:
+                valid_files.append(fp)
+                total_rows += row_count
+                validation_results.append({"filename": fname, "valid": True, "rows": row_count})
             else:
-                fail_total += 1
-                flash(f"❌ {r['filename']}: {r['message']}")
+                validation_results.append({"filename": fname, "valid": False, "error": error_msg})
 
-        flash(f"📊 Import Summary: {success_total} file(s) succeeded, {fail_total} file(s) failed out of {len(results)} total.")
+        if not valid_files:
+            # Semua file gagal validasi -> bersihkan & tampilkan pesan
+            for fp in all_file_paths:
+                try:
+                    os.remove(fp)
+                except:
+                    pass
+            for td in temp_dirs:
+                try:
+                    import shutil
+                    shutil.rmtree(td, ignore_errors=True)
+                except:
+                    pass
 
-    finally:
-        # Cleanup all uploaded/extracted files
+            flash('All files failed validation.')
+            for v in validation_results:
+                if not v['valid']:
+                    flash(f"❌ {v['filename']}: {v.get('error', 'Validation failed.')}")
+            return redirect(url_for('index'))
+
+        # Tampilkan hasil validasi per file (warning untuk yang gagal)
+        for v in validation_results:
+            if v['valid']:
+                flash(f"✅ {v['filename']}: {v['rows']} rows, validation passed.")
+            else:
+                flash(f"❌ {v['filename']}: {v.get('error', 'Validation failed.')}")
+
+        # ========== Step 3: Buat job batch (sama seperti API) ==========
+        batch_id = str(uuid.uuid4())
+        filenames = [os.path.basename(fp) for fp in valid_files]
+        data_manager.create_import_job(batch_id, ', '.join(filenames), table_name)
+        data_manager.update_job_status(batch_id, total_rows=total_rows)
+
+        # ========== Step 4: Jalankan proses async (sama seperti API) ==========
+        thread = threading.Thread(
+            target=data_manager.process_import_async,
+            args=(valid_files, table_name, batch_id, temp_dirs),
+            daemon=True
+        )
+        thread.start()
+
+        flash(f"📦 Import job created with ID: {batch_id}.")
+        flash(f"📊 Total rows to process: {total_rows} from {len(valid_files)} file(s).")
+        flash("ℹ️ Data is being processed in background. You can check job status via API /api/jobs or /api/jobs/<batch_id>.")
+
+        return redirect(url_for('index'))
+
+    except Exception as e:
+        # Cleanup on unexpected error
         for fp in all_file_paths:
             try:
                 os.remove(fp)
@@ -214,7 +261,8 @@ def import_file():
             except:
                 pass
 
-    return redirect(url_for('index'))
+        flash(f"Server error during import: {str(e)}")
+        return redirect(url_for('index'))
 
 @app.route('/export/<format_type>')
 def export_file(format_type):
@@ -493,6 +541,11 @@ def api_delete_alias(alias_id):
         return jsonify({"success": True, "data": {"message": "Alias deleted."}}), 200
     else:
         return jsonify({"success": False, "error": "Failed to delete alias."}), 400
+    
+@app.route('/batch')
+def batch_page():
+    jobs = data_manager.get_all_jobs(limit=100)
+    return render_template('batch.html', jobs=jobs)
 
 
 if __name__ == '__main__':
