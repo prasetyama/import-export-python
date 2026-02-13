@@ -1,0 +1,4 @@
+inv_sku,inv_distid,inv_pcs,inv_periode,distid
+SKU-001,WH-A,100,2025-01-15,123
+SKU-002,WH-B,200,2025-02-20,456
+SKU-003,WH-C,300,2025-03-25,789

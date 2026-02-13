@@ -3,6 +3,8 @@ import data_manager
 import config
 import pandas as pd
 import os
+import uuid
+import threading
 from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
@@ -235,7 +237,7 @@ def export_file(format_type):
 
 @app.route('/api/import', methods=['POST'])
 def api_import_file():
-    """API: Upload multiple files (+ ZIP) and import data. Returns JSON results."""
+    """API: Upload files, quick validate, then process async. Returns batch_id."""
     files = request.files.getlist('files')
     if not files or all(f.filename == '' for f in files):
         return jsonify({"success": False, "error": "No files provided."}), 400
@@ -244,8 +246,10 @@ def api_import_file():
     all_file_paths = []
     temp_dirs = []
     warnings = []
+    filenames = []
 
     try:
+        # Step 1: Save files and extract ZIPs
         for file in files:
             if file.filename == '':
                 continue
@@ -283,27 +287,71 @@ def api_import_file():
         if not all_file_paths:
             return jsonify({"success": False, "error": "No valid data files to process.", "warnings": warnings}), 400
 
-        results = data_manager.import_multiple_files(all_file_paths, table_name)
+        # Step 2: Quick validate each file (Phase 1)
+        validation_results = []
+        valid_files = []
+        total_rows = 0
 
-        success_count = sum(1 for r in results if r['success'])
-        fail_count = sum(1 for r in results if not r['success'])
+        for fp in all_file_paths:
+            fname = os.path.basename(fp)
+            is_valid, error_msg, row_count = data_manager.quick_validate_file(fp, table_name)
+            if is_valid:
+                valid_files.append(fp)
+                total_rows += row_count
+                validation_results.append({"filename": fname, "valid": True, "rows": row_count})
+            else:
+                validation_results.append({"filename": fname, "valid": False, "error": error_msg})
 
+        if not valid_files:
+            # All files failed validation — cleanup and return errors
+            for fp in all_file_paths:
+                try:
+                    os.remove(fp)
+                except:
+                    pass
+            for td in temp_dirs:
+                try:
+                    import shutil
+                    shutil.rmtree(td, ignore_errors=True)
+                except:
+                    pass
+            return jsonify({
+                "success": False,
+                "error": "All files failed validation.",
+                "validation": validation_results,
+                "warnings": warnings
+            }), 400
+
+        # Step 3: Create batch job
+        batch_id = str(uuid.uuid4())
+        filenames = [os.path.basename(fp) for fp in valid_files]
+        data_manager.create_import_job(batch_id, ', '.join(filenames), table_name)
+        data_manager.update_job_status(batch_id, total_rows=total_rows)
+
+        # Step 4: Start background thread (Phase 2)
+        thread = threading.Thread(
+            target=data_manager.process_import_async,
+            args=(valid_files, table_name, batch_id, temp_dirs),
+            daemon=True
+        )
+        thread.start()
+
+        # Return immediately with batch_id
         return jsonify({
             "success": True,
             "data": {
-                "summary": {
-                    "total_files": len(results),
-                    "succeeded": success_count,
-                    "failed": fail_count
-                },
-                "results": results,
-                "warnings": warnings
+                "batch_id": batch_id,
+                "status": "pending",
+                "total_rows": total_rows,
+                "files": filenames,
+                "validation": validation_results,
+                "warnings": warnings,
+                "message": "Import job started. Use GET /api/jobs/<batch_id> to check progress."
             }
-        }), 200
+        }), 202
 
     except Exception as e:
-        return jsonify({"success": False, "error": f"Server error: {str(e)}"}), 500
-    finally:
+        # Cleanup on unexpected error
         for fp in all_file_paths:
             try:
                 os.remove(fp)
@@ -315,6 +363,25 @@ def api_import_file():
                 shutil.rmtree(td, ignore_errors=True)
             except:
                 pass
+        return jsonify({"success": False, "error": f"Server error: {str(e)}"}), 500
+
+
+@app.route('/api/jobs', methods=['GET'])
+def api_get_jobs():
+    """API: List all import jobs."""
+    limit = request.args.get('limit', 50, type=int)
+    jobs = data_manager.get_all_jobs(limit=limit)
+    return jsonify({"success": True, "data": jobs}), 200
+
+
+@app.route('/api/jobs/<batch_id>', methods=['GET'])
+def api_get_job(batch_id):
+    """API: Get status of a specific import job by batch_id."""
+    job = data_manager.get_job(batch_id)
+    if job:
+        return jsonify({"success": True, "data": job}), 200
+    else:
+        return jsonify({"success": False, "error": "Job not found."}), 404
 
 
 @app.route('/api/tables', methods=['GET'])

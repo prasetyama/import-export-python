@@ -148,6 +148,26 @@ def create_database():
                     )
                     print("Seeded default column_aliases.")
 
+            # --- Import Jobs Table ---
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS import_jobs (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                batch_id VARCHAR(36) UNIQUE NOT NULL,
+                filename VARCHAR(255),
+                table_name VARCHAR(100),
+                status ENUM('pending','validating','processing','completed','failed') DEFAULT 'pending',
+                total_rows INT DEFAULT 0,
+                processed_rows INT DEFAULT 0,
+                success_count INT DEFAULT 0,
+                error_count INT DEFAULT 0,
+                error_details JSON,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                completed_at TIMESTAMP NULL
+            )
+            """)
+            print("Table 'import_jobs' created or already exists.")
+            connection.commit()
+
     except Error as e:
         print(f"Error while connecting to MySQL: {e}")
     finally:

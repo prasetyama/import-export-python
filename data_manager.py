@@ -6,6 +6,9 @@ import os
 import zipfile
 import tempfile
 import shutil
+import uuid
+import json
+import threading
 
 def get_connection():
     """Establishes a connection to the database."""
@@ -949,3 +952,313 @@ def import_multiple_files(file_paths, table_name='auto'):
             })
 
     return results
+
+
+# ==================== IMPORT JOB TRACKING ====================
+
+def create_import_job(batch_id, filename, table_name):
+    """Creates a new import job record in the database."""
+    connection = get_connection()
+    if not connection: return None
+    try:
+        cursor = connection.cursor()
+        cursor.execute(
+            "INSERT INTO import_jobs (batch_id, filename, table_name, status) VALUES (%s, %s, %s, 'pending')",
+            (batch_id, filename, table_name)
+        )
+        connection.commit()
+        return batch_id
+    except Error as e:
+        print(f"Error creating job: {e}")
+        return None
+    finally:
+        if connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+
+
+def update_job_status(batch_id, status=None, total_rows=None, processed_rows=None,
+                      success_count=None, error_count=None, error_details=None):
+    """Updates import job progress fields."""
+    connection = get_connection()
+    if not connection: return False
+    try:
+        cursor = connection.cursor()
+        updates = []
+        params = []
+
+        if status is not None:
+            updates.append("status = %s")
+            params.append(status)
+        if total_rows is not None:
+            updates.append("total_rows = %s")
+            params.append(total_rows)
+        if processed_rows is not None:
+            updates.append("processed_rows = %s")
+            params.append(processed_rows)
+        if success_count is not None:
+            updates.append("success_count = %s")
+            params.append(success_count)
+        if error_count is not None:
+            updates.append("error_count = %s")
+            params.append(error_count)
+        if error_details is not None:
+            updates.append("error_details = %s")
+            params.append(json.dumps(error_details))
+        if status in ('completed', 'failed'):
+            updates.append("completed_at = NOW()")
+
+        if not updates:
+            return True
+
+        params.append(batch_id)
+        query = f"UPDATE import_jobs SET {', '.join(updates)} WHERE batch_id = %s"
+        cursor.execute(query, tuple(params))
+        connection.commit()
+        return True
+    except Error as e:
+        print(f"Error updating job: {e}")
+        return False
+    finally:
+        if connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+
+
+def get_job(batch_id):
+    """Gets a single import job by batch_id."""
+    connection = get_connection()
+    if not connection: return None
+    try:
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM import_jobs WHERE batch_id = %s", (batch_id,))
+        job = cursor.fetchone()
+        if job and job.get('error_details'):
+            if isinstance(job['error_details'], str):
+                job['error_details'] = json.loads(job['error_details'])
+        # Convert datetime to string for JSON serialization
+        if job:
+            for key in ('created_at', 'completed_at'):
+                if job.get(key):
+                    job[key] = job[key].isoformat()
+        return job
+    except Error as e:
+        print(f"Error getting job: {e}")
+        return None
+    finally:
+        if connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+
+
+def get_all_jobs(limit=50):
+    """Gets all import jobs, most recent first."""
+    connection = get_connection()
+    if not connection: return []
+    try:
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM import_jobs ORDER BY created_at DESC LIMIT %s", (limit,))
+        jobs = cursor.fetchall()
+        for job in jobs:
+            if job.get('error_details') and isinstance(job['error_details'], str):
+                job['error_details'] = json.loads(job['error_details'])
+            for key in ('created_at', 'completed_at'):
+                if job.get(key):
+                    job[key] = job[key].isoformat()
+        return jobs
+    except Error as e:
+        print(f"Error getting jobs: {e}")
+        return []
+    finally:
+        if connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+
+
+def quick_validate_file(filepath, table_name):
+    """
+    Quick validation: checks file extension, headers, and first 2 rows.
+    Returns (is_valid, error_message, row_count)
+    """
+    if not os.path.exists(filepath):
+        return False, "File not found.", 0
+
+    base_name = os.path.basename(filepath)
+    _, ext = os.path.splitext(base_name)
+
+    if ext.lower() not in ['.csv', '.txt']:
+        return False, f"Unsupported file extension '{ext}'.", 0
+
+    try:
+        # Read file
+        if ext.lower() in ['.csv', '.txt']:
+            df = pd.read_csv(filepath, sep=None, engine='python')
+        else:
+            return False, "Unsupported format.", 0
+
+        if df.empty:
+            return False, "File is empty.", 0
+
+        total_rows = len(df)
+
+        # Normalize headers
+        df.columns = [str(col).strip().lower() for col in df.columns]
+
+        # Load config for the target table
+        if table_name and table_name != 'auto':
+            configs = get_column_configs(table_name=table_name)
+        else:
+            # For auto-detect, try to find matching table
+            connection = get_connection()
+            if not connection:
+                return False, "Database connection failed.", 0
+            try:
+                cursor = connection.cursor(dictionary=True)
+                name_only = os.path.splitext(base_name)[0].lower()
+                cursor.execute("SELECT table_name FROM import_tables WHERE allowed_filename = %s", (name_only,))
+                result = cursor.fetchone()
+                if not result:
+                    return False, f"Filename '{name_only}' does not match any configured table.", 0
+                table_name = result['table_name']
+                configs = get_column_configs(table_name=table_name)
+            finally:
+                if connection and connection.is_connected():
+                    cursor.close()
+                    connection.close()
+
+        if not configs:
+            return False, f"No column configuration found for table '{table_name}'.", 0
+
+        # Check mandatory column headers exist
+        column_mapping = {name: conf['aliases'] for name, conf in configs.items()}
+        missing_required = []
+
+        for key, possible_names in column_mapping.items():
+            if configs[key]['is_mandatory']:
+                found = any(name in df.columns for name in possible_names)
+                if not found:
+                    missing_required.append(key)
+
+        if missing_required:
+            return False, f"Missing mandatory columns: {', '.join(missing_required)}", total_rows
+
+        # Validate first 2 data rows (basic type check)
+        sample = df.head(2)
+        row_errors = []
+
+        for idx, row in sample.iterrows():
+            for key, conf in configs.items():
+                aliases = conf['aliases']
+                val = None
+                for alias in aliases:
+                    if alias in sample.columns:
+                        val = row[alias]
+                        break
+
+                if val is None or (pd.isna(val) and conf['is_mandatory']):
+                    if conf['is_mandatory']:
+                        row_errors.append(f"Row {idx+1}: {key} is missing.")
+                    continue
+
+                if pd.notna(val) and str(val).strip() != '':
+                    if conf['data_type'] == 'int':
+                        try:
+                            int(float(val))
+                        except (ValueError, TypeError):
+                            row_errors.append(f"Row {idx+1}: {key} must be integer, got '{val}'.")
+                    elif conf['data_type'] == 'date':
+                        try:
+                            pd.to_datetime(val, errors='raise')
+                        except:
+                            row_errors.append(f"Row {idx+1}: {key} invalid date format '{val}'.")
+
+        if row_errors:
+            return False, f"Validation errors in sample rows: {'; '.join(row_errors)}", total_rows
+
+        return True, None, total_rows
+
+    except Exception as e:
+        return False, f"Error reading file: {str(e)}", 0
+
+
+def process_import_async(file_paths, table_name, batch_id, temp_dirs=None):
+    """
+    Background worker: processes all files for a batch job.
+    Updates job status in DB as it progresses.
+    Cleans up files when done.
+    """
+    try:
+        update_job_status(batch_id, status='processing')
+
+        all_errors = []
+        total_success = 0
+        total_errors = 0
+        total_processed = 0
+
+        for filepath in file_paths:
+            try:
+                if table_name and table_name != 'auto':
+                    result, messages = import_dynamic_data(filepath, table_name)
+                else:
+                    result, messages = import_file_process(filepath)
+
+                if result:
+                    sc = messages.get('success_count', 0) if isinstance(messages, dict) else 0
+                    errs = messages.get('errors', []) if isinstance(messages, dict) else []
+                    total_success += sc
+                    total_errors += len(errs)
+                    total_processed += sc + len(errs)
+                    if errs:
+                        fname = os.path.basename(filepath)
+                        all_errors.extend([f"{fname}: {e}" for e in errs])
+                else:
+                    error_msgs = messages if isinstance(messages, list) else [str(messages)]
+                    total_errors += 1
+                    total_processed += 1
+                    fname = os.path.basename(filepath)
+                    all_errors.extend([f"{fname}: {e}" for e in error_msgs])
+
+                # Update progress after each file
+                update_job_status(
+                    batch_id,
+                    processed_rows=total_processed,
+                    success_count=total_success,
+                    error_count=total_errors,
+                    error_details=all_errors if all_errors else None
+                )
+
+            except Exception as e:
+                fname = os.path.basename(filepath)
+                all_errors.append(f"{fname}: Unexpected error: {str(e)}")
+                total_errors += 1
+
+        # Final status
+        final_status = 'completed' if total_success > 0 else 'failed'
+        update_job_status(
+            batch_id,
+            status=final_status,
+            processed_rows=total_processed,
+            success_count=total_success,
+            error_count=total_errors,
+            error_details=all_errors if all_errors else None
+        )
+
+    except Exception as e:
+        update_job_status(
+            batch_id,
+            status='failed',
+            error_details=[f"Fatal error: {str(e)}"]
+        )
+    finally:
+        # Cleanup files
+        for fp in file_paths:
+            try:
+                os.remove(fp)
+            except:
+                pass
+        if temp_dirs:
+            for td in temp_dirs:
+                try:
+                    shutil.rmtree(td, ignore_errors=True)
+                except:
+                    pass
