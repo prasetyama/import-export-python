@@ -888,11 +888,6 @@ def import_file_process(filename):
             connection.close()
 
 def extract_zip(zip_path, extract_to):
-    """
-    Extracts a ZIP file to the given directory.
-    Returns list of valid data file paths (.csv, .txt) found inside.
-    Skips macOS resource fork files (__MACOSX, ._*).
-    """
     valid_extensions = ['.csv', '.txt']
     extracted_files = []
 
@@ -917,11 +912,6 @@ def extract_zip(zip_path, extract_to):
         return []
 
 def import_multiple_files(file_paths, table_name='auto'):
-    """
-    Processes multiple files for import.
-    Returns a list of result dicts, one per file:
-      { 'filename': str, 'success': bool, 'message': str, 'details': dict|list }
-    """
     results = []
 
     for filepath in file_paths:

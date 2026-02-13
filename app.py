@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, send_file, flash
+from flask import Flask, render_template, request, redirect, url_for, send_file, flash, jsonify
 import data_manager
 import config
 import pandas as pd
@@ -230,7 +230,202 @@ def export_file(format_type):
         flash('Failed to export data.')
         return redirect(url_for('index'))
 
-# Removed separate /import/stock route, merged into generic /import above
+
+# ==================== REST API ENDPOINTS ====================
+
+@app.route('/api/import', methods=['POST'])
+def api_import_file():
+    """API: Upload multiple files (+ ZIP) and import data. Returns JSON results."""
+    files = request.files.getlist('files')
+    if not files or all(f.filename == '' for f in files):
+        return jsonify({"success": False, "error": "No files provided."}), 400
+
+    table_name = request.form.get('table_name', 'auto')
+    all_file_paths = []
+    temp_dirs = []
+    warnings = []
+
+    try:
+        for file in files:
+            if file.filename == '':
+                continue
+
+            filename = secure_filename(file.filename)
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            file.save(filepath)
+
+            _, ext = os.path.splitext(filename)
+
+            if ext.lower() == '.zip':
+                temp_dir = os.path.join(app.config['UPLOAD_FOLDER'], f'_zip_{os.path.splitext(filename)[0]}')
+                os.makedirs(temp_dir, exist_ok=True)
+                temp_dirs.append(temp_dir)
+
+                extracted = data_manager.extract_zip(filepath, temp_dir)
+                if extracted:
+                    all_file_paths.extend(extracted)
+                else:
+                    warnings.append(f"{filename}: Invalid ZIP or no data files found inside.")
+
+                try:
+                    os.remove(filepath)
+                except:
+                    pass
+            elif ext.lower() in ['.csv', '.txt']:
+                all_file_paths.append(filepath)
+            else:
+                warnings.append(f"{filename}: Unsupported file type '{ext}'. Skipped.")
+                try:
+                    os.remove(filepath)
+                except:
+                    pass
+
+        if not all_file_paths:
+            return jsonify({"success": False, "error": "No valid data files to process.", "warnings": warnings}), 400
+
+        results = data_manager.import_multiple_files(all_file_paths, table_name)
+
+        success_count = sum(1 for r in results if r['success'])
+        fail_count = sum(1 for r in results if not r['success'])
+
+        return jsonify({
+            "success": True,
+            "data": {
+                "summary": {
+                    "total_files": len(results),
+                    "succeeded": success_count,
+                    "failed": fail_count
+                },
+                "results": results,
+                "warnings": warnings
+            }
+        }), 200
+
+    except Exception as e:
+        return jsonify({"success": False, "error": f"Server error: {str(e)}"}), 500
+    finally:
+        for fp in all_file_paths:
+            try:
+                os.remove(fp)
+            except:
+                pass
+        for td in temp_dirs:
+            try:
+                import shutil
+                shutil.rmtree(td, ignore_errors=True)
+            except:
+                pass
+
+
+@app.route('/api/tables', methods=['GET'])
+def api_get_tables():
+    """API: List all import tables."""
+    tables = data_manager.get_import_tables()
+    return jsonify({"success": True, "data": tables}), 200
+
+
+@app.route('/api/tables', methods=['POST'])
+def api_create_table():
+    """API: Create a new import table. Expects JSON body."""
+    data = request.get_json()
+    if not data:
+        return jsonify({"success": False, "error": "JSON body required."}), 400
+
+    table_name = data.get('table_name')
+    display_name = data.get('display_name')
+    allowed_filename = data.get('allowed_filename', '')
+    columns = data.get('columns', [])  # [{"name": "col", "type": "str"}]
+
+    if not table_name or not display_name:
+        return jsonify({"success": False, "error": "table_name and display_name are required."}), 400
+
+    if data_manager.create_new_import_table(table_name, display_name, columns, allowed_filename):
+        return jsonify({"success": True, "data": {"message": f"Table '{display_name}' created."}}), 201
+    else:
+        return jsonify({"success": False, "error": "Failed to create table. Name might be duplicate."}), 400
+
+
+@app.route('/api/tables/<table_name>/columns', methods=['GET'])
+def api_get_columns(table_name):
+    """API: Get column configs + aliases for a table."""
+    configs = data_manager.get_column_configs(table_name=table_name)
+    return jsonify({"success": True, "data": configs}), 200
+
+
+@app.route('/api/tables/<table_name>/columns', methods=['POST'])
+def api_add_column(table_name):
+    """API: Add a column to an existing table. Expects JSON body."""
+    data = request.get_json()
+    if not data:
+        return jsonify({"success": False, "error": "JSON body required."}), 400
+
+    column_name = data.get('column_name')
+    data_type = data.get('data_type', 'str')
+
+    if not column_name:
+        return jsonify({"success": False, "error": "column_name is required."}), 400
+
+    if data_manager.add_column_to_table(table_name, column_name, data_type):
+        return jsonify({"success": True, "data": {"message": f"Column '{column_name}' added to {table_name}."}}), 201
+    else:
+        return jsonify({"success": False, "error": "Failed to add column."}), 400
+
+
+@app.route('/api/tables/<int:table_id>/filename', methods=['PUT'])
+def api_update_filename(table_id):
+    """API: Update allowed_filename for a table. Expects JSON body."""
+    data = request.get_json()
+    if not data:
+        return jsonify({"success": False, "error": "JSON body required."}), 400
+
+    allowed_filename = data.get('allowed_filename', '')
+
+    if data_manager.update_allowed_filename(table_id, allowed_filename):
+        return jsonify({"success": True, "data": {"message": "Allowed filename updated."}}), 200
+    else:
+        return jsonify({"success": False, "error": "Failed to update allowed filename."}), 400
+
+
+@app.route('/api/columns/<int:column_id>', methods=['PUT'])
+def api_update_column(column_id):
+    """API: Update column config (is_mandatory, data_type). Expects JSON body."""
+    data = request.get_json()
+    if not data:
+        return jsonify({"success": False, "error": "JSON body required."}), 400
+
+    is_mandatory = data.get('is_mandatory', False)
+    data_type = data.get('data_type', 'str')
+
+    if data_manager.update_column_config(column_id, is_mandatory, data_type):
+        return jsonify({"success": True, "data": {"message": "Column config updated."}}), 200
+    else:
+        return jsonify({"success": False, "error": "Failed to update column config."}), 400
+
+
+@app.route('/api/columns/<int:column_id>/aliases', methods=['POST'])
+def api_add_alias(column_id):
+    """API: Add alias to a column. Expects JSON body."""
+    data = request.get_json()
+    if not data:
+        return jsonify({"success": False, "error": "JSON body required."}), 400
+
+    alias_name = data.get('alias_name')
+    if not alias_name:
+        return jsonify({"success": False, "error": "alias_name is required."}), 400
+
+    if data_manager.add_alias(column_id, alias_name):
+        return jsonify({"success": True, "data": {"message": f"Alias '{alias_name}' added."}}), 201
+    else:
+        return jsonify({"success": False, "error": "Failed to add alias."}), 400
+
+
+@app.route('/api/aliases/<int:alias_id>', methods=['DELETE'])
+def api_delete_alias(alias_id):
+    """API: Delete an alias by ID."""
+    if data_manager.delete_alias(alias_id):
+        return jsonify({"success": True, "data": {"message": "Alias deleted."}}), 200
+    else:
+        return jsonify({"success": False, "error": "Failed to delete alias."}), 400
 
 
 if __name__ == '__main__':
