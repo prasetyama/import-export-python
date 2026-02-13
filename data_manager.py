@@ -3,6 +3,9 @@ import mysql.connector
 from mysql.connector import Error
 import config
 import os
+import zipfile
+import tempfile
+import shutil
 
 def get_connection():
     """Establishes a connection to the database."""
@@ -66,16 +69,12 @@ def import_data(filename):
             return False
 
         cursor = connection.cursor()
-        
-        # Determine columns from dataframe
-        # Assuming table columns: name, price, quantity (id is auto-increment)
-        # We start by checking if expected columns exist in the file
+
         required_columns = ['name', 'price', 'quantity']
         if not all(col in df.columns for col in required_columns):
             print(f"File must contain columns: {required_columns}")
             return False
 
-        # Construct INSERT query
         insert_query = f"INSERT INTO {config.TABLE_NAME} (name, price, quantity) VALUES (%s, %s, %s)"
         
         # Prepare data
@@ -235,7 +234,6 @@ def update_allowed_filename(table_id, allowed_filename):
 def create_new_import_table(table_name, display_name, initial_columns, allowed_filename=''):
     """
     Creates a new import table dynamically.
-    initial_columns: list of dicts {'name': 'col_name', 'type': 'str'|'int'|'date'}
     allowed_filename: expected filename for auto-detect import
     """
     connection = get_connection()
@@ -888,3 +886,76 @@ def import_file_process(filename):
         if connection and connection.is_connected():
             cursor.close()
             connection.close()
+
+def extract_zip(zip_path, extract_to):
+    """
+    Extracts a ZIP file to the given directory.
+    Returns list of valid data file paths (.csv, .txt) found inside.
+    Skips macOS resource fork files (__MACOSX, ._*).
+    """
+    valid_extensions = ['.csv', '.txt']
+    extracted_files = []
+
+    try:
+        with zipfile.ZipFile(zip_path, 'r') as zf:
+            zf.extractall(extract_to)
+
+        # Walk extracted directory and collect valid files
+        for root, dirs, files in os.walk(extract_to):
+            # Skip macOS resource fork directories
+            dirs[:] = [d for d in dirs if d != '__MACOSX']
+            for fname in files:
+                # Skip hidden/resource fork files
+                if fname.startswith('._') or fname.startswith('.'):
+                    continue
+                _, ext = os.path.splitext(fname)
+                if ext.lower() in valid_extensions:
+                    extracted_files.append(os.path.join(root, fname))
+
+        return extracted_files
+    except zipfile.BadZipFile:
+        return []
+
+def import_multiple_files(file_paths, table_name='auto'):
+    """
+    Processes multiple files for import.
+    Returns a list of result dicts, one per file:
+      { 'filename': str, 'success': bool, 'message': str, 'details': dict|list }
+    """
+    results = []
+
+    for filepath in file_paths:
+        base_name = os.path.basename(filepath)
+
+        try:
+            if table_name and table_name != 'auto':
+                result, messages = import_dynamic_data(filepath, table_name)
+            else:
+                result, messages = import_file_process(filepath)
+
+            if result:
+                success_count = messages.get('success_count', 0) if isinstance(messages, dict) else 0
+                errors = messages.get('errors', []) if isinstance(messages, dict) else []
+                results.append({
+                    'filename': base_name,
+                    'success': True,
+                    'message': f"Processed {success_count} records.",
+                    'errors': errors
+                })
+            else:
+                error_msg = messages[0] if isinstance(messages, list) and messages else str(messages)
+                results.append({
+                    'filename': base_name,
+                    'success': False,
+                    'message': error_msg,
+                    'errors': messages if isinstance(messages, list) else [str(messages)]
+                })
+        except Exception as e:
+            results.append({
+                'filename': base_name,
+                'success': False,
+                'message': f"Unexpected error: {str(e)}",
+                'errors': [str(e)]
+            })
+
+    return results

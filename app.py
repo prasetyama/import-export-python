@@ -129,45 +129,89 @@ def index():
 
 @app.route('/import', methods=['POST'])
 def import_file():
-    if 'file' not in request.files:
-        flash('No file part')
+    files = request.files.getlist('files')
+    if not files or all(f.filename == '' for f in files):
+        flash('No files selected')
         return redirect(url_for('index'))
-    
-    file = request.files['file']
-    if file.filename == '':
-        flash('No selected file')
-        return redirect(url_for('index'))
-    
-    if file:
-        filename = secure_filename(file.filename)
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        file.save(filepath)
-        
-        # Determine import type based on filename OR selection
-        table_name = request.form.get('table_name')
-        
-        if table_name and table_name != 'auto':
-             result, messages = data_manager.import_dynamic_data(filepath, table_name)
-        else:
-             # Fallback to auto-detection
-             result, messages = data_manager.import_file_process(filepath)
-        
-        if result:
-             # messages is a dict with success_count and errors
-             flash(f"Import complete. Processed {messages['success_count']} records.")
-             if messages['errors']:
-                 for error in messages['errors']:
-                     flash(f"Warning: {error}")
-        else:
-             # messages is a list of errors
-             flash(f"Import Failed: {messages[0]}")
-        
-        # Clean up uploaded file
-        try:
-            os.remove(filepath)
-        except:
-            pass
-            
+
+    table_name = request.form.get('table_name', 'auto')
+    all_file_paths = []
+    temp_dirs = []  # track temp dirs for cleanup
+
+    try:
+        for file in files:
+            if file.filename == '':
+                continue
+
+            filename = secure_filename(file.filename)
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            file.save(filepath)
+
+            _, ext = os.path.splitext(filename)
+
+            if ext.lower() == '.zip':
+                # Extract ZIP to temp directory
+                temp_dir = os.path.join(app.config['UPLOAD_FOLDER'], f'_zip_{os.path.splitext(filename)[0]}')
+                os.makedirs(temp_dir, exist_ok=True)
+                temp_dirs.append(temp_dir)
+
+                extracted = data_manager.extract_zip(filepath, temp_dir)
+                if extracted:
+                    all_file_paths.extend(extracted)
+                else:
+                    flash(f"⚠️ {filename}: Invalid ZIP file or no data files (.csv/.txt) found inside.")
+
+                # Remove the zip file itself
+                try:
+                    os.remove(filepath)
+                except:
+                    pass
+            elif ext.lower() in ['.csv', '.txt']:
+                all_file_paths.append(filepath)
+            else:
+                flash(f"⚠️ {filename}: Unsupported file type '{ext}'. Skipped.")
+                try:
+                    os.remove(filepath)
+                except:
+                    pass
+
+        if not all_file_paths:
+            flash('No valid data files to process.')
+            return redirect(url_for('index'))
+
+        # Process all collected files
+        results = data_manager.import_multiple_files(all_file_paths, table_name)
+
+        # Flash results per file
+        success_total = 0
+        fail_total = 0
+        for r in results:
+            if r['success']:
+                success_total += 1
+                flash(f"✅ {r['filename']}: {r['message']}")
+                if r.get('errors'):
+                    for err in r['errors']:
+                        flash(f"⚠️ {r['filename']}: {err}")
+            else:
+                fail_total += 1
+                flash(f"❌ {r['filename']}: {r['message']}")
+
+        flash(f"📊 Import Summary: {success_total} file(s) succeeded, {fail_total} file(s) failed out of {len(results)} total.")
+
+    finally:
+        # Cleanup all uploaded/extracted files
+        for fp in all_file_paths:
+            try:
+                os.remove(fp)
+            except:
+                pass
+        for td in temp_dirs:
+            try:
+                import shutil
+                shutil.rmtree(td, ignore_errors=True)
+            except:
+                pass
+
     return redirect(url_for('index'))
 
 @app.route('/export/<format_type>')
