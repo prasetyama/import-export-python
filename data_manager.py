@@ -764,7 +764,8 @@ def import_file_process(filename, table_name):
         insert_keys = list(configs.keys())
         placeholders = ', '.join(['%s'] * len(insert_keys))
         columns_sql = ', '.join(insert_keys)
-        insert_query = f"INSERT INTO {table_name} ({columns_sql}) VALUES ({placeholders})"
+        update_clause = ", ".join([f"{col}=VALUES({col})" for col in insert_keys])
+        insert_query = f"INSERT INTO {table_name} ({columns_sql}) VALUES ({placeholders}) ON DUPLICATE KEY UPDATE {update_clause}"
 
         data_to_insert = []
         errors = []
