@@ -725,9 +725,9 @@ def import_dynamic_data(filename, table_name):
         table_info = cursor.fetchone()
         
         if table_info and table_info['allowed_filename']:
-            allowed = table_info['allowed_filename'].strip().lower()
-            if allowed != name_only_lower:
-                return False, [f"Filename '{name_only}' does not match the configured allowed filename for table '{table_name}'. Expected: '{allowed}'"]
+            allowed_list = [a.strip().lower() for a in table_info['allowed_filename'].split(',') if a.strip()]
+            if allowed_list and name_only_lower not in allowed_list:
+                return False, [f"Filename '{name_only}' does not match any of the configured allowed filenames for table '{table_name}'. Expected one of: {', '.join(allowed_list)}"]
 
         # 3. Read File
         if filename.endswith('.csv') or filename.endswith('.txt'):
@@ -877,10 +877,12 @@ def import_file_process(filename):
         tables = cursor.fetchall()
         
         for table in tables:
-            allowed = table['allowed_filename'].strip().lower()
-            # 2. Match filename without extension
-            if allowed and allowed == name_only_lower:
-                return import_dynamic_data(filename, table['table_name'])
+            allowed_str = table['allowed_filename'].strip().lower()
+            if allowed_str:
+                allowed_list = [a.strip() for a in allowed_str.split(',') if a.strip()]
+                # 2. Match filename without extension against any in the list
+                if name_only_lower in allowed_list:
+                    return import_dynamic_data(filename, table['table_name'])
         
         return False, [f"Filename '{name_only}' does not match any configured import table. Please set the allowed filename in Master Config or select the target table manually."]
     except Error as e:
@@ -1114,12 +1116,21 @@ def quick_validate_file(filepath, table_name):
                 return False, "Database connection failed.", 0
             try:
                 cursor = connection.cursor(dictionary=True)
+                # Fetch all tables and check their allowed_filename lists
+                cursor.execute("SELECT table_name, allowed_filename FROM import_tables WHERE allowed_filename != ''")
+                tables = cursor.fetchall()
                 name_only = os.path.splitext(base_name)[0].lower()
-                cursor.execute("SELECT table_name FROM import_tables WHERE allowed_filename = %s", (name_only,))
-                result = cursor.fetchone()
-                if not result:
+                
+                target_table = None
+                for t in tables:
+                    allowed_list = [a.strip().lower() for a in t['allowed_filename'].split(',') if a.strip()]
+                    if name_only in allowed_list:
+                        target_table = t['table_name']
+                        break
+                
+                if not target_table:
                     return False, f"Filename '{name_only}' does not match any configured table.", 0
-                table_name = result['table_name']
+                table_name = target_table
                 configs = get_column_configs(table_name=table_name)
             finally:
                 if connection and connection.is_connected():
