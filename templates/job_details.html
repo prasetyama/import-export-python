@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Job Details: {{ job.batch_id }}</h2>
+
+<div class="controls">
+    <p><strong>Status:</strong> {{ job.status }}</p>
+    <p><strong>Table:</strong> {{ job.table_name }}</p>
+    <p><strong>Files:</strong> {{ job.filename }}</p>
+    <p><strong>Overall:</strong> {{ job.success_count }} success, {{ job.error_count }} error (out of {{ job.total_rows
+        }} rows)</p>
+    <p><strong>Started:</strong> {{ job.created_at }}</p>
+    {% if job.completed_at %}
+    <p><strong>Completed:</strong> {{ job.completed_at }}</p>
+    {% endif %}
+</div>
+
+<h3>Per-File Results</h3>
+{% if details %}
+<table>
+    <thead>
+        <tr>
+            <th>Filename</th>
+            <th>Status</th>
+            <th>Success</th>
+            <th>Error</th>
+            <th>Details</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for detail in details %}
+        <tr>
+            <td>{{ detail.filename }}</td>
+            <td>{{ detail.status }}</td>
+            <td>{{ detail.success_count }}</td>
+            <td>{{ detail.error_count }}</td>
+            <td>
+                {% if detail.error_details %}
+                <button onclick="toggleErrors('errors-{{ loop.index }}')">Toggle Errors</button>
+                <div id="errors-{{ loop.index }}"
+                    style="display:none; margin-top:10px; font-size: 0.9em; color: #721c24; background: #f8d7da; padding: 10px; border-radius: 4px;">
+                    <ul style="margin:0; padding-left:20px;">
+                        {% if detail.error_details is iterable and detail.error_details is not string %}
+                        {% for err in detail.error_details %}
+                        <li>{{ err }}</li>
+                        {% endfor %}
+                        {% else %}
+                        <li>{{ detail.error_details }}</li>
+                        {% endif %}
+                    </ul>
+                </div>
+                {% else %}
+                -
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No individual file results found for this batch.</p>
+{% endif %}
+
+<p style="margin-top: 20px;">
+    <a href="/batch" class="btn">Back to Batches</a>
+</p>
+
+<script>
+    function toggleErrors(id) {
+        var x = document.getElementById(id);
+        if (x.style.display === "none") {
+            x.style.display = "block";
+        } else {
+            x.style.display = "none";
+        }
+    }
+</script>
+
+{% endblock %}

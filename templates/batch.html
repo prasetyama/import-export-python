@@ -22,13 +22,13 @@
     <tbody>
         {% for job in jobs %}
         <tr>
-            <td>{{ job.batch_id }}</td>
+            <td><a href="/batch/{{ job.batch_id }}">{{ job.batch_id }}</a></td>
             <td>{{ job.filename }}</td>
             <td>{{ job.total_rows }}</td>
             <td>{{ job.processed_rows }}</td>
             <td>{{ job.success_count }}</td>
             <td>{{ job.error_count }}</td>
-            <td>{{ job.status }}</td>       
+            <td>{{ job.status }}</td>
             <td>{{ job.created_at }}</td>
             <td>{{ job.completed_at }}</td>
         </tr>

@@ -1077,6 +1077,87 @@ def get_all_jobs(limit=50):
             connection.close()
 
 
+def create_job_detail(batch_id, filename):
+    """Initializes a tracking record for an individual file in a batch."""
+    connection = get_connection()
+    if not connection: return False
+    try:
+        cursor = connection.cursor()
+        cursor.execute(
+            "INSERT INTO import_job_details (batch_id, filename, status) VALUES (%s, %s, 'pending')",
+            (batch_id, filename)
+        )
+        connection.commit()
+        return True
+    except Error as e:
+        print(f"Error creating job detail: {e}")
+        return False
+    finally:
+        if connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+
+
+def update_job_detail(batch_id, filename, status=None, success_count=None, error_count=None, error_details=None):
+    """Updates tracking results for an individual file."""
+    connection = get_connection()
+    if not connection: return False
+    try:
+        cursor = connection.cursor()
+        updates = []
+        params = []
+        if status:
+            updates.append("status = %s")
+            params.append(status)
+        if success_count is not None:
+            updates.append("success_count = %s")
+            params.append(success_count)
+        if error_count is not None:
+            updates.append("error_count = %s")
+            params.append(error_count)
+        if error_details:
+            updates.append("error_details = %s")
+            params.append(json.dumps(error_details))
+        
+        if not updates: return True
+        
+        params.extend([batch_id, filename])
+        query = f"UPDATE import_job_details SET {', '.join(updates)} WHERE batch_id = %s AND filename = %s"
+        cursor.execute(query, tuple(params))
+        connection.commit()
+        return True
+    except Error as e:
+        print(f"Error updating job detail: {e}")
+        return False
+    finally:
+        if connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+
+
+def get_job_file_details(batch_id):
+    """Retrieves results for all files in a specific batch."""
+    connection = get_connection()
+    if not connection: return []
+    try:
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM import_job_details WHERE batch_id = %s", (batch_id,))
+        details = cursor.fetchall()
+        for d in details:
+            if d.get('error_details') and isinstance(d['error_details'], str):
+                d['error_details'] = json.loads(d['error_details'])
+            if d.get('created_at'):
+                d['created_at'] = d['created_at'].isoformat()
+        return details
+    except Error as e:
+        print(f"Error getting job file details: {e}")
+        return []
+    finally:
+        if connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+
+
 def quick_validate_file(filepath, table_name):
     """
     Quick validation: checks file extension, headers, and first 2 rows.
@@ -1207,27 +1288,41 @@ def process_import_async(file_paths, table_name, batch_id, temp_dirs=None):
         total_processed = 0
 
         for filepath in file_paths:
+            fname = os.path.basename(filepath)
+            create_job_detail(batch_id, fname)
             try:
+                update_job_detail(batch_id, fname, status='processing')
                 if table_name and table_name != 'auto':
                     result, messages = import_dynamic_data(filepath, table_name)
                 else:
                     result, messages = import_file_process(filepath)
 
+                file_success = 0
+                file_errors = []
                 if result:
-                    sc = messages.get('success_count', 0) if isinstance(messages, dict) else 0
-                    errs = messages.get('errors', []) if isinstance(messages, dict) else []
-                    total_success += sc
-                    total_errors += len(errs)
-                    total_processed += sc + len(errs)
-                    if errs:
-                        fname = os.path.basename(filepath)
-                        all_errors.extend([f"{fname}: {e}" for e in errs])
+                    file_success = messages.get('success_count', 0) if isinstance(messages, dict) else 0
+                    file_errors = messages.get('errors', []) if isinstance(messages, dict) else []
+                    total_success += file_success
+                    total_errors += len(file_errors)
+                    total_processed += file_success + len(file_errors)
+                    if file_errors:
+                        all_errors.extend([f"{fname}: {e}" for e in file_errors])
                 else:
                     error_msgs = messages if isinstance(messages, list) else [str(messages)]
                     total_errors += 1
                     total_processed += 1
-                    fname = os.path.basename(filepath)
                     all_errors.extend([f"{fname}: {e}" for e in error_msgs])
+                    file_errors = error_msgs
+
+                # Update per-file status
+                file_status = 'completed' if result and not file_errors else ('completed' if result else 'failed')
+                update_job_detail(
+                    batch_id, fname, 
+                    status=file_status, 
+                    success_count=file_success, 
+                    error_count=len(file_errors) if isinstance(file_errors, list) else 1,
+                    error_details=file_errors
+                )
 
                 # Update progress after each file
                 update_job_status(

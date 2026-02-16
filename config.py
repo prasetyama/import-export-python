@@ -7,4 +7,4 @@ DB_PASSWORD = os.getenv('DB_PASSWORD', 'root123456%qaz!') # SENSITIVE: Change th
 DB_NAME = os.getenv('DB_NAME', 'inventory_db')
 
 # Table Name
-TABLE_NAME = 'stockssss'
+TABLE_NAME = 'inventory'

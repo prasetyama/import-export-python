@@ -166,6 +166,23 @@ def create_database():
             )
             """)
             print("Table 'import_jobs' created or already exists.")
+
+            # --- Import Job Details Table ---
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS import_job_details (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                batch_id VARCHAR(36),
+                filename VARCHAR(255),
+                status ENUM('pending','processing','completed','failed') DEFAULT 'pending',
+                success_count INT DEFAULT 0,
+                error_count INT DEFAULT 0,
+                error_details JSON,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (batch_id) REFERENCES import_jobs(batch_id) ON DELETE CASCADE
+            )
+            """)
+            print("Table 'import_job_details' created or already exists.")
+
             connection.commit()
 
     except Error as e:
