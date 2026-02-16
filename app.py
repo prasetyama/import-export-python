@@ -116,7 +116,7 @@ def index():
     data = []
     if conn:
         try:
-            query = f"SELECT * FROM {config.TABLE_NAME}"
+            query = f"SELECT * FROM {config.TABLE_NAME} order by id desc limit 100"
             df = pd.read_sql(query, conn)
             data = df.to_dict(orient='records')
         except Exception as e:
@@ -227,13 +227,13 @@ def import_file():
             else:
                 flash(f"❌ {v['filename']}: {v.get('error', 'Validation failed.')}")
 
-        # ========== Step 3: Buat job batch (sama seperti API) ==========
+        # ========== Step 3: Buat job batch ==========
         batch_id = str(uuid.uuid4())
         filenames = [os.path.basename(fp) for fp in valid_files]
         data_manager.create_import_job(batch_id, ', '.join(filenames), table_name)
         data_manager.update_job_status(batch_id, total_rows=total_rows)
 
-        # ========== Step 4: Jalankan proses async (sama seperti API) ==========
+        # ========== Step 4: Jalankan proses async ==========
         thread = threading.Thread(
             target=data_manager.process_import_async,
             args=(valid_files, table_name, batch_id, temp_dirs),
@@ -432,6 +432,13 @@ def api_get_job(batch_id):
         return jsonify({"success": False, "error": "Job not found."}), 404
 
 
+@app.route('/api/jobs/<batch_id>/details', methods=['GET'])
+def api_get_job_details(batch_id):
+    """API: Get per-file details for a specific import job."""
+    details = data_manager.get_job_file_details(batch_id)
+    return jsonify({"success": True, "data": details}), 200
+
+
 @app.route('/api/tables', methods=['GET'])
 def api_get_tables():
     """API: List all import tables."""
@@ -546,6 +553,17 @@ def api_delete_alias(alias_id):
 def batch_page():
     jobs = data_manager.get_all_jobs(limit=100)
     return render_template('batch.html', jobs=jobs)
+
+
+@app.route('/batch/<batch_id>')
+def batch_detail_page(batch_id):
+    job = data_manager.get_job(batch_id)
+    if not job:
+        flash("Job not found.", "error")
+        return redirect(url_for('batch_page'))
+    
+    details = data_manager.get_job_file_details(batch_id)
+    return render_template('job_details.html', job=job, details=details)
 
 
 if __name__ == '__main__':

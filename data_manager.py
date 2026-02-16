@@ -691,22 +691,26 @@ def import_sales_data(filename):
                 cursor.close()
             connection.close()
 
-def import_dynamic_data(filename, table_name):
-    """
-    Generic import function for any configured table with filename validation.
-    """
+def _check_import_file_basic(filename):
+    """Basic validation for file existence and extension."""
     if not os.path.exists(filename):
         return False, ["File not found."]
+    _, extension = os.path.splitext(filename)
+    if extension.lower() not in ['.csv', '.txt']:
+        return False, [f"Unsupported file extension '{extension}'. Only .csv and .txt are allowed."]
+    return True, None
+
+
+def import_file_process(filename, table_name):
+    """
+    Generic import function for a specific table.
+    """
+    valid, errs = _check_import_file_basic(filename)
+    if not valid: return False, errs
 
     base_name = os.path.basename(filename)
-    name_only, extension = os.path.splitext(base_name)
+    name_only, _ = os.path.splitext(base_name)
     name_only_lower = name_only.lower()
-    extension_lower = extension.lower()
-
-    # 1. Extension Validation
-    allowed_extensions = ['.csv', '.txt']
-    if extension_lower not in allowed_extensions:
-        return False, [f"Unsupported file extension '{extension}'. Only {', '.join(allowed_extensions)} are allowed."]
 
     # Load Config from DB
     configs = get_column_configs(table_name=table_name)
@@ -720,7 +724,7 @@ def import_dynamic_data(filename, table_name):
     cursor = None
     try:
         cursor = connection.cursor(dictionary=True)
-        # 2. Filename Validation against Table Config
+        # Check Filename Validation against Table Config
         cursor.execute("SELECT allowed_filename FROM import_tables WHERE table_name = %s", (table_name,))
         table_info = cursor.fetchone()
         
@@ -729,18 +733,13 @@ def import_dynamic_data(filename, table_name):
             if allowed_list and name_only_lower not in allowed_list:
                 return False, [f"Filename '{name_only}' does not match any of the configured allowed filenames for table '{table_name}'. Expected one of: {', '.join(allowed_list)}"]
 
-        # 3. Read File
-        if filename.endswith('.csv') or filename.endswith('.txt'):
-            df = pd.read_csv(filename, sep=None, engine='python')
-        elif filename.endswith('.xlsx') or filename.endswith('.xls'):
-            df = pd.read_excel(filename)
-        else:
-            return False, ["Unsupported file format."]
+        # Read File
+        df = pd.read_csv(filename, sep=None, engine='python')
 
-        # 2. Normalize Headers
+        # Normalize Headers
         df.columns = [str(col).strip().lower() for col in df.columns]
 
-        # 3. Map Columns
+        # Map Columns
         final_columns = {}
         missing_columns = []
         column_mapping = { name: conf['aliases'] for name, conf in configs.items() }
@@ -756,22 +755,15 @@ def import_dynamic_data(filename, table_name):
                 missing_columns.append(key)
         
         # Check Mandatory
-        missing_required = []
-        for col_key in missing_columns:
-            if configs[col_key]['is_mandatory']:
-                missing_required.append(col_key)
-
+        missing_required = [col_key for col_key in missing_columns if configs[col_key]['is_mandatory']]
         if missing_required:
             return False, [f"Missing mandatory columns: {', '.join(missing_required)}"]
 
-        # 4. Prepare SQL
+        # Prepare SQL
         cursor = connection.cursor()
-        
-        # Get actual columns to insert (configured keys)
         insert_keys = list(configs.keys())
         placeholders = ', '.join(['%s'] * len(insert_keys))
         columns_sql = ', '.join(insert_keys)
-        
         insert_query = f"INSERT INTO {table_name} ({columns_sql}) VALUES ({placeholders})"
 
         data_to_insert = []
@@ -785,64 +777,43 @@ def import_dynamic_data(filename, table_name):
             for key in insert_keys:
                 conf = configs[key]
                 col_ref = final_columns.get(key)
-                
-                val = None
-                if col_ref is not None:
-                    if isinstance(col_ref, int):
-                         val = row.iloc[col_ref]
-                    else:
-                         val = row[col_ref]
+                val = row[col_ref] if col_ref is not None else None
 
                 # Validation & Cleaning
-                clean_val = None
-                
-                # Check Mandatory
-                if conf['is_mandatory']:
-                     if pd.isna(val) or str(val).strip() == '':
-                         row_errors.append(f"Row {index+1}: {key} is missing.")
-                         row_valid = False
+                if conf['is_mandatory'] and (pd.isna(val) or str(val).strip() == ''):
+                    row_errors.append(f"Row {index+1}: {key} is missing.")
+                    row_valid = False
+                    break
                          
-                if not row_valid: break
-
                 if pd.notna(val) and str(val).strip() != '':
                     try:
                         if conf['data_type'] == 'int':
                             clean_val = int(float(val))
                         elif conf['data_type'] == 'date':
                             try:
-                                parsed = pd.to_datetime(val, dayfirst=False)
-                                clean_val = parsed.strftime('%Y-%m-%d')
+                                clean_val = pd.to_datetime(val, dayfirst=False).strftime('%Y-%m-%d')
                             except:
-                                parsed = pd.to_datetime(val, dayfirst=True)
-                                clean_val = parsed.strftime('%Y-%m-%d')
+                                clean_val = pd.to_datetime(val, dayfirst=True).strftime('%Y-%m-%d')
                         else:
                             clean_val = str(val)
-                    except ValueError:
+                    except Exception:
                          row_errors.append(f"Row {index+1}: Invalid value for {key} ({val})")
                          row_valid = False
+                         break
                 else:
-                    # Default values for missing/empty
-                    if conf['data_type'] == 'int':
-                        clean_val = 0
-                    elif conf['data_type'] == 'date':
-                        clean_val = None
-                    else:
-                        clean_val = ''
+                    clean_val = 0 if conf['data_type'] == 'int' else (None if conf['data_type'] == 'date' else '')
                 
                 row_vals.append(clean_val)
             
-            if row_errors:
+            if not row_valid:
                 errors.extend(row_errors)
                 continue
-                
-            if row_valid:
-                data_to_insert.append(tuple(row_vals))
+            data_to_insert.append(tuple(row_vals))
 
         if data_to_insert:
             cursor.executemany(insert_query, data_to_insert)
             connection.commit()
-            success_count = cursor.rowcount
-            return True, {"success_count": success_count, "errors": errors}
+            return True, {"success_count": cursor.rowcount, "errors": errors}
         else:
             return False, errors + ["No valid rows to insert."]
 
@@ -850,26 +821,20 @@ def import_dynamic_data(filename, table_name):
         return False, [f"System Error: {str(e)}"]
     finally:
         if connection and connection.is_connected():
-            if cursor:
-                cursor.close()
+            if cursor: cursor.close()
             connection.close()
 
-def import_file_process(filename):
-    """Detects file type based on name and calls appropriate import function using dynamic config."""
-    base_name = os.path.basename(filename)
-    name_only, extension = os.path.splitext(base_name)
-    name_only_lower = name_only.lower()
-    extension_lower = extension.lower()
-    
-    # 1. Extension Validation (only .csv and .txt allowed)
-    allowed_extensions = ['.csv', '.txt']
-    if extension_lower not in allowed_extensions:
-        return False, [f"Unsupported file extension '{extension}'. Only {', '.join(allowed_extensions)} are allowed."]
 
-    # Dynamic lookup: check allowed_filename in import_tables
+def import_dynamic_data(filename):
+    """Auto-detects table based on filename and processes the import."""
+    valid, errs = _check_import_file_basic(filename)
+    if not valid: return False, errs
+
+    base_name = os.path.basename(filename)
+    name_only_lower = os.path.splitext(base_name)[0].lower()
+
     connection = get_connection()
-    if not connection:
-        return False, ["Database connection failed."]
+    if not connection: return False, ["Database connection failed."]
     
     try:
         cursor = connection.cursor(dictionary=True)
@@ -877,16 +842,13 @@ def import_file_process(filename):
         tables = cursor.fetchall()
         
         for table in tables:
-            allowed_str = table['allowed_filename'].strip().lower()
-            if allowed_str:
-                allowed_list = [a.strip() for a in allowed_str.split(',') if a.strip()]
-                # 2. Match filename without extension against any in the list
-                if name_only_lower in allowed_list:
-                    return import_dynamic_data(filename, table['table_name'])
+            allowed_list = [a.strip().lower() for a in table['allowed_filename'].split(',') if a.strip()]
+            if name_only_lower in allowed_list:
+                return import_file_process(filename, table['table_name'])
         
-        return False, [f"Filename '{name_only}' does not match any configured import table. Please set the allowed filename in Master Config or select the target table manually."]
+        return False, [f"Filename '{os.path.splitext(base_name)[0]}' does not match any configured table. Update Master Config or select table manually."]
     except Error as e:
-        return False, [f"Error during auto-detect: {str(e)}"]
+        return False, [f"Auto-detect Error: {str(e)}"]
     finally:
         if connection and connection.is_connected():
             cursor.close()
@@ -924,9 +886,9 @@ def import_multiple_files(file_paths, table_name='auto'):
 
         try:
             if table_name and table_name != 'auto':
-                result, messages = import_dynamic_data(filepath, table_name)
+                result, messages = import_file_process(filepath, table_name)
             else:
-                result, messages = import_file_process(filepath)
+                result, messages = import_dynamic_data(filepath)
 
             if result:
                 success_count = messages.get('success_count', 0) if isinstance(messages, dict) else 0
@@ -1160,64 +1122,42 @@ def get_job_file_details(batch_id):
 
 def quick_validate_file(filepath, table_name):
     """
-    Quick validation: checks file extension, headers, and first 2 rows.
-    Returns (is_valid, error_message, row_count)
+    Quick validation: checks file extension, headers, and basic rules.
     """
-    if not os.path.exists(filepath):
-        return False, "File not found.", 0
-
-    base_name = os.path.basename(filepath)
-    _, ext = os.path.splitext(base_name)
-
-    if ext.lower() not in ['.csv', '.txt']:
-        return False, f"Unsupported file extension '{ext}'.", 0
+    valid, errs = _check_import_file_basic(filepath)
+    if not valid: return False, errs[0], 0
 
     try:
-        # Read file
-        if ext.lower() in ['.csv', '.txt']:
-            df = pd.read_csv(filepath, sep=None, engine='python')
-        else:
-            return False, "Unsupported format.", 0
-
-        if df.empty:
-            return False, "File is empty.", 0
-
+        df = pd.read_csv(filepath, sep=None, engine='python')
+        if df.empty: return False, "File is empty.", 0
         total_rows = len(df)
 
         # Normalize headers
         df.columns = [str(col).strip().lower() for col in df.columns]
 
-        # Load config for the target table
-        if table_name and table_name != 'auto':
-            configs = get_column_configs(table_name=table_name)
-        else:
-            # For auto-detect, try to find matching table
+        # Auto-detect if needed
+        if not table_name or table_name == 'auto':
+            base_name = os.path.basename(filepath)
+            name_only = os.path.splitext(base_name)[0].lower()
+            
             connection = get_connection()
-            if not connection:
-                return False, "Database connection failed.", 0
-            try:
-                cursor = connection.cursor(dictionary=True)
-                # Fetch all tables and check their allowed_filename lists
-                cursor.execute("SELECT table_name, allowed_filename FROM import_tables WHERE allowed_filename != ''")
-                tables = cursor.fetchall()
-                name_only = os.path.splitext(base_name)[0].lower()
-                
-                target_table = None
-                for t in tables:
-                    allowed_list = [a.strip().lower() for a in t['allowed_filename'].split(',') if a.strip()]
-                    if name_only in allowed_list:
-                        target_table = t['table_name']
-                        break
-                
-                if not target_table:
-                    return False, f"Filename '{name_only}' does not match any configured table.", 0
-                table_name = target_table
-                configs = get_column_configs(table_name=table_name)
-            finally:
-                if connection and connection.is_connected():
-                    cursor.close()
-                    connection.close()
+            if not connection: return False, "DB connection failed", 0
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute("SELECT table_name, allowed_filename FROM import_tables WHERE allowed_filename != ''")
+            tables = cursor.fetchall()
+            
+            target_table = None
+            for t in tables:
+                allowed_list = [a.strip().lower() for a in t['allowed_filename'].split(',') if a.strip()]
+                if name_only in allowed_list:
+                    target_table = t['table_name']
+                    break
+            
+            if not target_table:
+                return False, f"Filename '{name_only}' not recognized.", 0
+            table_name = target_table
 
+        configs = get_column_configs(table_name=table_name)
         if not configs:
             return False, f"No column configuration found for table '{table_name}'.", 0
 
@@ -1293,9 +1233,9 @@ def process_import_async(file_paths, table_name, batch_id, temp_dirs=None):
             try:
                 update_job_detail(batch_id, fname, status='processing')
                 if table_name and table_name != 'auto':
-                    result, messages = import_dynamic_data(filepath, table_name)
+                    result, messages = import_file_process(filepath, table_name)
                 else:
-                    result, messages = import_file_process(filepath)
+                    result, messages = import_dynamic_data(filepath)
 
                 file_success = 0
                 file_errors = []
