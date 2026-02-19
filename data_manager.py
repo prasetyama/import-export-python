@@ -275,6 +275,9 @@ def create_new_import_table(table_name, display_name, initial_columns, allowed_f
             if col.get('is_unique'):
                 unique_constraints.append(f"UNIQUE ({col['name']})")
             
+        # Add system column ImportDate
+        col_defs.append("ImportDate DATETIME DEFAULT CURRENT_TIMESTAMP")
+            
         create_sql = f"CREATE TABLE {table_name} ({', '.join(col_defs + unique_constraints)})"
         cursor.execute(create_sql)
         
@@ -396,15 +399,16 @@ def import_stock_data(filename):
         errors = []
 
         insert_query = """
-            INSERT INTO stocks (sku, warehouse_code, stock_pcs, stock_box, stock_cs, date, dist_id)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO stocks (sku, warehouse_code, stock_pcs, stock_box, stock_cs, date, dist_id, ImportDate)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
             ON DUPLICATE KEY UPDATE
             warehouse_code=VALUES(warehouse_code),
             stock_pcs=VALUES(stock_pcs),
             stock_box=VALUES(stock_box),
             stock_cs=VALUES(stock_cs),
             date=VALUES(date),
-            dist_id=VALUES(dist_id)
+            dist_id=VALUES(dist_id),
+            ImportDate=NOW()
         """
 
         data_to_insert = []
@@ -584,9 +588,9 @@ def import_sales_data(filename):
             INSERT INTO sales (
                 dist_id, date, salesman, sku, re_pcs, do_pcs, rj_pcs, 
                 amount_jual, amount_std, amount_trd, 
-                disc_add, disc_prod, disc_po, disc_bonus
+                disc_add, disc_prod, disc_po, disc_bonus, ImportDate
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
         """
 
         data_to_insert = []
@@ -781,7 +785,8 @@ def import_file_process(filename, table_name):
         placeholders = ', '.join(['%s'] * len(insert_keys))
         columns_sql = ', '.join(insert_keys)
         update_clause = ", ".join([f"{col}=VALUES({col})" for col in insert_keys])
-        insert_query = f"INSERT INTO {table_name} ({columns_sql}) VALUES ({placeholders}) ON DUPLICATE KEY UPDATE {update_clause}"
+        update_clause += ", ImportDate=NOW()"
+        insert_query = f"INSERT INTO {table_name} ({columns_sql}, ImportDate) VALUES ({placeholders}, NOW()) ON DUPLICATE KEY UPDATE {update_clause}"
 
         data_to_insert = []
         errors = []
