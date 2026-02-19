@@ -212,7 +212,11 @@ def import_file():
                 validation_results.append({"filename": fname, "valid": True, "rows": row_count})
             else:
                 validation_results.append({"filename": fname, "valid": False, "error": error_msg})
-
+                # Create a failed import job for this file
+                fail_batch_id = str(uuid.uuid4())
+                data_manager.create_import_job(fail_batch_id, fname, table_name)
+                data_manager.update_job_status(fail_batch_id, status='failed', 
+                    error_count=1, error_details=[f"Quick validation failed: {error_msg}"])
         if not valid_files:
             # Semua file gagal validasi -> bersihkan & tampilkan pesan
             for fp in all_file_paths:
@@ -369,6 +373,11 @@ def api_import_file():
                 validation_results.append({"filename": fname, "valid": True, "rows": row_count})
             else:
                 validation_results.append({"filename": fname, "valid": False, "error": error_msg})
+                # Create a failed import job for this file
+                fail_batch_id = str(uuid.uuid4())
+                data_manager.create_import_job(fail_batch_id, fname, table_name)
+                data_manager.update_job_status(fail_batch_id, status='failed',
+                    error_count=1, error_details=[f"Quick validation failed: {error_msg}"])
 
         # Check if all files failed validation
         if not valid_files:
