@@ -287,6 +287,8 @@ def export_file(format_type):
 def api_import_file():
     """API: Upload files, quick validate, then process async. Returns batch_id."""
     files = request.files.getlist('files')
+    mode = request.form.get('mode', 'full')  # 'quick' or 'full'
+
     if not files or all(f.filename == '' for f in files):
         return jsonify({"success": False, "error": "No files provided."}), 400
 
@@ -350,6 +352,7 @@ def api_import_file():
             else:
                 validation_results.append({"filename": fname, "valid": False, "error": error_msg})
 
+        # Check if all files failed validation
         if not valid_files:
             # All files failed validation — cleanup and return errors
             for fp in all_file_paths:
@@ -370,6 +373,32 @@ def api_import_file():
                 "warnings": warnings
             }), 400
 
+        # ========== MODE CHECK: QUICK VALIDATION ONLY ==========
+        if mode == 'quick':
+            # Cleanup all files immediately
+            for fp in all_file_paths:
+                try:
+                    os.remove(fp)
+                except:
+                    pass
+            for td in temp_dirs:
+                try:
+                    import shutil
+                    shutil.rmtree(td, ignore_errors=True)
+                except:
+                    pass
+            
+            # Return validation results
+            return jsonify({
+                "success": True,
+                "mode": "quick",
+                "message": "Quick validation completed.",
+                "validation": validation_results,
+                "warnings": warnings
+            }), 200
+
+        # ========== MODE CHECK: FULL PROCESS ==========
+        
         # Step 3: Create batch job
         batch_id = str(uuid.uuid4())
         filenames = [os.path.basename(fp) for fp in valid_files]
@@ -387,6 +416,7 @@ def api_import_file():
         # Return immediately with batch_id
         return jsonify({
             "success": True,
+            "mode": "full",
             "data": {
                 "batch_id": batch_id,
                 "status": "pending",
@@ -567,4 +597,4 @@ def batch_detail_page(batch_id):
 
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(host='0.0.0.0', debug=True)
