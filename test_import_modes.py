@@ -39,5 +39,26 @@ def test_imports():
     except Exception as e:
         print(f"Full Mode Test Failed: {e}")
 
+    # Test 3: Default Mode (No Param)
+    print("\n--- Testing Default Mode (No Param) ---")
+    file_obj.seek(0)
+    files_default = {'files': ('test_stock.csv', file_obj, 'text/csv')}
+    # No mode in data
+    data_default = {'table_name': 'stocks'}
+    
+    try:
+        response_default = requests.post(url, files=files_default, data=data_default)
+        print(f"Status Code: {response_default.status_code}")
+        print("Response JSON:", response_default.json())
+        
+        json_resp = response_default.json()
+        if json_resp.get('mode') == 'full' and 'batch_id' in json_resp.get('data', {}):
+             print("SUCCESS: Defaulted to full mode.")
+        else:
+             print("FAILURE: Did not default to full mode.")
+             
+    except Exception as e:
+        print(f"Default Mode Test Failed: {e}")
+
 if __name__ == "__main__":
     test_imports()

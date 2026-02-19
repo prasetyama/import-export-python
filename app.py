@@ -300,7 +300,12 @@ def export_file(format_type):
 def api_import_file():
     """API: Upload files, quick validate, then process async. Returns batch_id."""
     files = request.files.getlist('files')
-    mode = request.form.get('mode', 'full')  # 'quick' or 'full'
+    
+    # Determine mode: 'quick' (validate only), 'full' (validate + import)
+    # Default to 'full' if mode is missing or invalid
+    mode = request.form.get('mode')
+    if not mode or mode not in ['quick', 'full']:
+        mode = 'full'
 
     if not files or all(f.filename == '' for f in files):
         return jsonify({"success": False, "error": "No files provided."}), 400
