@@ -203,6 +203,11 @@ def import_file():
         valid_files = []
         total_rows = 0
 
+        # Generate single batch_id for entire upload
+        batch_id = str(uuid.uuid4())
+        all_filenames = [os.path.basename(fp) for fp in all_file_paths]
+        data_manager.create_import_job(batch_id, ', '.join(all_filenames), table_name)
+
         for fp in all_file_paths:
             fname = os.path.basename(fp)
             is_valid, error_msg, row_count = data_manager.quick_validate_file(fp, table_name)
@@ -213,12 +218,14 @@ def import_file():
             else:
                 validation_results.append({"filename": fname, "valid": False, "error": error_msg})
                 # Create a failed import job for this file
-                fail_batch_id = str(uuid.uuid4())
-                data_manager.create_import_job(fail_batch_id, fname, table_name)
-                data_manager.update_job_status(fail_batch_id, status='failed', 
+                data_manager.create_import_job(batch_id, fname, table_name)
+                data_manager.update_job_status(batch_id, status='failed', 
                     error_count=1, error_details=[f"Quick validation failed: {error_msg}"])
         if not valid_files:
-            # Semua file gagal validasi -> bersihkan & tampilkan pesan
+            # Semua file gagal validasi -> update job as failed & cleanup
+            failed_errors = [f"{v['filename']}: {v.get('error', 'Validation failed.')}" for v in validation_results if not v['valid']]
+            data_manager.update_job_status(batch_id, status='failed',
+                error_count=len(failed_errors), error_details=failed_errors)
             for fp in all_file_paths:
                 try:
                     os.remove(fp)
@@ -244,10 +251,7 @@ def import_file():
             else:
                 flash(f"❌ {v['filename']}: {v.get('error', 'Validation failed.')}")
 
-        # ========== Step 3: Buat job batch ==========
-        batch_id = str(uuid.uuid4())
-        filenames = [os.path.basename(fp) for fp in valid_files]
-        data_manager.create_import_job(batch_id, ', '.join(filenames), table_name)
+        # ========== Step 3: Update job & start async processing ==========
         data_manager.update_job_status(batch_id, total_rows=total_rows)
 
         # ========== Step 4: Jalankan proses async ==========
@@ -364,6 +368,11 @@ def api_import_file():
         valid_files = []
         total_rows = 0
 
+        # Generate single batch_id for entire upload
+        batch_id = str(uuid.uuid4())
+        all_filenames = [os.path.basename(fp) for fp in all_file_paths]
+        data_manager.create_import_job(batch_id, ', '.join(all_filenames), table_name)
+
         for fp in all_file_paths:
             fname = os.path.basename(fp)
             is_valid, error_msg, row_count = data_manager.quick_validate_file(fp, table_name)
@@ -374,14 +383,16 @@ def api_import_file():
             else:
                 validation_results.append({"filename": fname, "valid": False, "error": error_msg})
                 # Create a failed import job for this file
-                fail_batch_id = str(uuid.uuid4())
-                data_manager.create_import_job(fail_batch_id, fname, table_name)
-                data_manager.update_job_status(fail_batch_id, status='failed',
+                data_manager.create_import_job(batch_id, fname, table_name)
+                data_manager.update_job_status(batch_id, status='failed',
                     error_count=1, error_details=[f"Quick validation failed: {error_msg}"])
 
         # Check if all files failed validation
         if not valid_files:
-            # All files failed validation — cleanup and return errors
+            # All files failed — update job as failed & cleanup
+            failed_errors = [f"{v['filename']}: {v.get('error', 'Validation failed.')}" for v in validation_results if not v['valid']]
+            data_manager.update_job_status(batch_id, status='failed',
+                error_count=len(failed_errors), error_details=failed_errors)
             for fp in all_file_paths:
                 try:
                     os.remove(fp)
@@ -396,12 +407,15 @@ def api_import_file():
             return jsonify({
                 "success": False,
                 "error": "All files failed validation.",
+                "batch_id": batch_id,
                 "validation": validation_results,
                 "warnings": warnings
             }), 400
 
         # ========== MODE CHECK: QUICK VALIDATION ONLY ==========
         if mode == 'quick':
+            # Update job as completed for quick mode
+            data_manager.update_job_status(batch_id, status='completed', total_rows=total_rows)
             # Cleanup all files immediately
             for fp in all_file_paths:
                 try:
@@ -419,6 +433,7 @@ def api_import_file():
             return jsonify({
                 "success": True,
                 "mode": "quick",
+                "batch_id": batch_id,
                 "message": "Quick validation completed.",
                 "validation": validation_results,
                 "warnings": warnings
@@ -426,10 +441,7 @@ def api_import_file():
 
         # ========== MODE CHECK: FULL PROCESS ==========
         
-        # Step 3: Create batch job
-        batch_id = str(uuid.uuid4())
-        filenames = [os.path.basename(fp) for fp in valid_files]
-        data_manager.create_import_job(batch_id, ', '.join(filenames), table_name)
+        # Update job with total rows
         data_manager.update_job_status(batch_id, total_rows=total_rows)
 
         # Step 4: Start background thread (Phase 2)
@@ -441,6 +453,7 @@ def api_import_file():
         thread.start()
 
         # Return immediately with batch_id
+        filenames = [os.path.basename(fp) for fp in valid_files]
         return jsonify({
             "success": True,
             "mode": "full",
