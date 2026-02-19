@@ -161,7 +161,12 @@
                         <option value="str">String (Text)</option>
                         <option value="int">Integer (Number)</option>
                         <option value="date">Date</option>
+                        <option value="datetime">Datetime</option>
                     </select>
+                    <label style="display: flex; align-items: center; gap: 5px; font-weight: normal;">
+                        <input type="checkbox" onchange="updateUniqueInput(this)"> Unique
+                        <input type="hidden" name="col_unique[]" value="false">
+                    </label>
                 </div>
             </div>
             <button type="button" onclick="addColumnRow()" style="background-color: #28a745; margin-bottom: 10px;">+ Add
@@ -227,7 +232,13 @@
                     <option value="str">String</option>
                     <option value="int">Integer</option>
                     <option value="date">Date</option>
+                    <option value="datetime">Datetime</option>
                 </select>
+            </div>
+            <div class="form-group">
+                <label style="display: flex; align-items: center; gap: 5px;">
+                    <input type="checkbox" name="is_unique"> Unique
+                </label>
             </div>
             <button type="submit">Add Column</button>
         </form>
@@ -244,10 +255,21 @@
                     <option value="str">String</option>
                     <option value="int">Integer</option>
                     <option value="date">Date</option>
+                    <option value="datetime">Datetime</option>
                 </select>
+                <label style="display: flex; align-items: center; gap: 5px; font-weight: normal;">
+                    <input type="checkbox" onchange="updateUniqueInput(this)"> Unique
+                    <input type="hidden" name="col_unique[]" value="false">
+                </label>
                 <button type="button" class="remove-col" onclick="this.parentElement.remove()">X</button>
             `;
             container.appendChild(newRow);
+        }
+
+        function updateUniqueInput(checkbox) {
+            // Find the sibling hidden input and update its value
+            const hiddenInput = checkbox.parentElement.querySelector('input[type="hidden"]');
+            hiddenInput.value = checkbox.checked ? 'true' : 'false';
         }
     </script>
 </body>

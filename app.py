@@ -27,10 +27,11 @@ def config_page():
 def update_config():
     column_id = request.form.get('id')
     is_mandatory = request.form.get('is_mandatory') == 'on'
+    is_unique = request.form.get('is_unique') == 'on'
     data_type = request.form.get('data_type')
     table_name = request.form.get('table_name', 'stocks') # Need to pass this back for redirect
     
-    if data_manager.update_column_config(column_id, is_mandatory, data_type):
+    if data_manager.update_column_config(column_id, is_mandatory, is_unique, data_type):
         flash("Configuration updated successfully.", "success")
     else:
         flash("Failed to update configuration.", "error")
@@ -74,10 +75,21 @@ def add_table():
     col_names = request.form.getlist('col_name[]')
     col_types = request.form.getlist('col_type[]')
     
+    # Handling checkboxes for dynamic rows is tricky. 
+    # We will assume frontend sends a hidden input for each row or we process differently.
+    # Actually, simplistic approach: check if 'col_unique_{index}' exists for each name index.
+    # But names are just a list. 
+    # Better approach: The frontend should send col_unique[] as a list of "true"/"false" strings, managed by JS.
+    col_uniques = request.form.getlist('col_unique[]')
+    
     initial_columns = []
-    for name, dtype in zip(col_names, col_types):
+    for i, (name, dtype) in enumerate(zip(col_names, col_types)):
         if name and name.strip():
-            initial_columns.append({'name': name.strip(), 'type': dtype})
+            is_unique = False
+            if i < len(col_uniques):
+               is_unique = (col_uniques[i] == 'true')
+            
+            initial_columns.append({'name': name.strip(), 'type': dtype, 'is_unique': is_unique})
             
     if data_manager.create_new_import_table(table_name, display_name, initial_columns, allowed_filename):
         flash(f"Table '{display_name}' created successfully.", "success")
@@ -102,8 +114,9 @@ def add_column():
     table_name = request.form.get('table_name')
     column_name = request.form.get('column_name')
     data_type = request.form.get('data_type')
+    is_unique = request.form.get('is_unique') == 'on'
     
-    if data_manager.add_column_to_table(table_name, column_name, data_type):
+    if data_manager.add_column_to_table(table_name, column_name, data_type, is_unique=is_unique):
         flash(f"Column '{column_name}' added to {table_name}.", "success")
     else:
         flash("Failed to add column.", "error")
@@ -486,7 +499,8 @@ def api_create_table():
     table_name = data.get('table_name')
     display_name = data.get('display_name')
     allowed_filename = data.get('allowed_filename', '')
-    columns = data.get('columns', [])  # [{"name": "col", "type": "str"}]
+    allowed_filename = data.get('allowed_filename', '')
+    columns = data.get('columns', [])  # [{"name": "col", "type": "str", "is_unique": false}]
 
     if not table_name or not display_name:
         return jsonify({"success": False, "error": "table_name and display_name are required."}), 400
@@ -513,11 +527,12 @@ def api_add_column(table_name):
 
     column_name = data.get('column_name')
     data_type = data.get('data_type', 'str')
+    is_unique = data.get('is_unique', False)
 
     if not column_name:
         return jsonify({"success": False, "error": "column_name is required."}), 400
 
-    if data_manager.add_column_to_table(table_name, column_name, data_type):
+    if data_manager.add_column_to_table(table_name, column_name, data_type, is_unique=is_unique):
         return jsonify({"success": True, "data": {"message": f"Column '{column_name}' added to {table_name}."}}), 201
     else:
         return jsonify({"success": False, "error": "Failed to add column."}), 400
@@ -546,9 +561,10 @@ def api_update_column(column_id):
         return jsonify({"success": False, "error": "JSON body required."}), 400
 
     is_mandatory = data.get('is_mandatory', False)
+    is_unique = data.get('is_unique', False)
     data_type = data.get('data_type', 'str')
 
-    if data_manager.update_column_config(column_id, is_mandatory, data_type):
+    if data_manager.update_column_config(column_id, is_mandatory, is_unique, data_type):
         return jsonify({"success": True, "data": {"message": "Column config updated."}}), 200
     else:
         return jsonify({"success": False, "error": "Failed to update column config."}), 400

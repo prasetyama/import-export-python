@@ -28,6 +28,7 @@
             <tr style="background-color: #f8f9fa; border-bottom: 2px solid #dee2e6;">
                 <th style="padding: 12px; text-align: left;">Column Name</th>
                 <th style="padding: 12px; text-align: center;">Mandatory</th>
+                <th style="padding: 12px; text-align: center;">Unique</th>
                 <th style="padding: 12px; text-align: left;">Data Type</th>
                 <th style="padding: 12px; text-align: left;">Aliases</th>
                 <th style="padding: 12px; text-align: center;">Actions</th>
@@ -45,11 +46,16 @@
                     <td style="padding: 12px; text-align: center;">
                         <input type="checkbox" name="is_mandatory" {% if conf.is_mandatory %}checked{% endif %}>
                     </td>
+                    <td style="padding: 12px; text-align: center;">
+                        <input type="checkbox" name="is_unique" {% if conf.is_unique %}checked{% endif %}>
+                    </td>
                     <td style="padding: 12px;">
                         <select name="data_type" style="padding: 5px; border-radius: 4px; border: 1px solid #ced4da;">
                             <option value="str" {% if conf.data_type=='str' %}selected{% endif %}>String</option>
                             <option value="int" {% if conf.data_type=='int' %}selected{% endif %}>Integer</option>
                             <option value="date" {% if conf.data_type=='date' %}selected{% endif %}>Date</option>
+                            <option value="datetime" {% if conf.data_type=='datetime' %}selected{% endif %}>Datetime
+                            </option>
                         </select>
                     </td>
                     <td style="padding: 12px;">

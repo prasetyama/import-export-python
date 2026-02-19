@@ -127,6 +127,7 @@ def get_column_configs(table_name='stocks'):
             config[row['column_name']] = {
                 'id': row['id'],
                 'is_mandatory': bool(row['is_mandatory']),
+                'is_unique': bool(row.get('is_unique', False)),
                 'data_type': row['data_type'],
                 'aliases': [row['column_name']], # Simple list for backend logic
                 'aliases_list': [] # Object list for UI (id, name)
@@ -157,15 +158,15 @@ def get_import_tables():
             cursor.close()
             connection.close()
 
-def update_column_config(column_id, is_mandatory, data_type):
+def update_column_config(column_id, is_mandatory, is_unique, data_type):
     """Updates configuration for a column."""
     connection = get_connection()
     if not connection: return False
     try:
         cursor = connection.cursor()
         cursor.execute(
-            "UPDATE column_definitions SET is_mandatory=%s, data_type=%s WHERE id=%s",
-            (is_mandatory, data_type, column_id)
+            "UPDATE column_definitions SET is_mandatory=%s, is_unique=%s, data_type=%s WHERE id=%s",
+            (is_mandatory, is_unique, data_type, column_id)
         )
         connection.commit()
         return True
@@ -253,26 +254,36 @@ def create_new_import_table(table_name, display_name, initial_columns, allowed_f
         
         # 2. Create physical table
         col_defs = ["id INT AUTO_INCREMENT PRIMARY KEY"]
+        unique_constraints = []
+        
         for col in initial_columns:
             dtype = "VARCHAR(255)"
             default = "DEFAULT ''"
+            
             if col['type'] == 'int':
                 dtype = "INT"
                 default = "DEFAULT 0"
             elif col['type'] == 'date':
                 dtype = "DATE"
                 default = "NULL"
+            elif col['type'] == 'datetime':
+                dtype = "DATETIME"
+                default = "NULL"
             
             col_defs.append(f"{col['name']} {dtype} {default}")
             
-        create_sql = f"CREATE TABLE {table_name} ({', '.join(col_defs)})"
+            if col.get('is_unique'):
+                unique_constraints.append(f"UNIQUE ({col['name']})")
+            
+        create_sql = f"CREATE TABLE {table_name} ({', '.join(col_defs + unique_constraints)})"
         cursor.execute(create_sql)
         
         # 3. Register columns in column_definitions
         for col in initial_columns:
+            is_unique = col.get('is_unique', False)
             cursor.execute(
-                "INSERT INTO column_definitions (table_name, column_name, is_mandatory, data_type) VALUES (%s, %s, %s, %s)",
-                (table_name, col['name'], True, col['type'])
+                "INSERT INTO column_definitions (table_name, column_name, is_mandatory, is_unique, data_type) VALUES (%s, %s, %s, %s, %s)",
+                (table_name, col['name'], True, is_unique, col['type'])
             )
             
         connection.commit()
@@ -285,7 +296,7 @@ def create_new_import_table(table_name, display_name, initial_columns, allowed_f
             cursor.close()
             connection.close()
 
-def add_column_to_table(table_name, column_name, data_type):
+def add_column_to_table(table_name, column_name, data_type, is_unique=False):
     """Adds a new column to an existing import table."""
     connection = get_connection()
     if not connection: return False
@@ -299,14 +310,19 @@ def add_column_to_table(table_name, column_name, data_type):
             dtype_sql = "INT DEFAULT 0"
         elif data_type == 'date':
             dtype_sql = "DATE NULL"
+        elif data_type == 'datetime':
+            dtype_sql = "DATETIME NULL"
             
         alter_sql = f"ALTER TABLE {table_name} ADD COLUMN {column_name} {dtype_sql}"
+        if is_unique:
+             alter_sql += f", ADD UNIQUE ({column_name})"
+             
         cursor.execute(alter_sql)
         
         # 2. Register in column_definitions
         cursor.execute(
-            "INSERT INTO column_definitions (table_name, column_name, is_mandatory, data_type) VALUES (%s, %s, %s, %s)",
-            (table_name, column_name, False, data_type)
+            "INSERT INTO column_definitions (table_name, column_name, is_mandatory, is_unique, data_type) VALUES (%s, %s, %s, %s, %s)",
+            (table_name, column_name, False, is_unique, data_type)
         )
         
         connection.commit()
@@ -795,14 +811,19 @@ def import_file_process(filename, table_name):
                                 clean_val = pd.to_datetime(val, dayfirst=False).strftime('%Y-%m-%d')
                             except:
                                 clean_val = pd.to_datetime(val, dayfirst=True).strftime('%Y-%m-%d')
+                        elif conf['data_type'] == 'datetime':
+                            try:
+                                clean_val = pd.to_datetime(val, dayfirst=False).strftime('%Y-%m-%d %H:%M:%S')
+                            except:
+                                clean_val = pd.to_datetime(val, dayfirst=True).strftime('%Y-%m-%d %H:%M:%S')
                         else:
                             clean_val = str(val)
                     except Exception:
-                         row_errors.append(f"Row {index+1}: Invalid value for {key} ({val})")
-                         row_valid = False
-                         break
+                        row_errors.append(f"Row {index+1}: Invalid value for {key} ({val})")
+                        row_valid = False
+                        break
                 else:
-                    clean_val = 0 if conf['data_type'] == 'int' else (None if conf['data_type'] == 'date' else '')
+                    clean_val = 0 if conf['data_type'] == 'int' else (None if conf['data_type'] in ['date', 'datetime'] else '')
                 
                 row_vals.append(clean_val)
             
