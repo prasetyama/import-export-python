@@ -309,14 +309,16 @@ def api_import_file():
     """API: Upload files, quick validate, then process async. Returns batch_id."""
     files = request.files.getlist('files')
     
-    # Determine mode: 'quick' (validate only), 'full' (validate + import)
-    # Default to 'full' if mode is missing or invalid
+    # Determine mode: 'quick', 'full', or both (if missing/invalid)
     mode = request.form.get('mode')
-    if not mode or mode not in ['quick', 'full']:
-        mode = 'full'
+    if not mode:
+        j = request.get_json(silent=True) or {}
+        mode = j.get('mode')
+    if mode not in ['quick', 'full']:
+        mode = 'both'  # special marker for both
 
     if not files or all(f.filename == '' for f in files):
-        return jsonify({"success": False, "error": "No files provided."}), 400
+        return jsonify({"success": False, "error": "No files provided.", "mode": mode}), 400
 
     table_name = request.form.get('table_name', 'auto')
     all_file_paths = []
@@ -361,7 +363,7 @@ def api_import_file():
                     pass
 
         if not all_file_paths:
-            return jsonify({"success": False, "error": "No valid data files to process.", "warnings": warnings}), 400
+            return jsonify({"success": False, "error": "No valid data files to process.", "warnings": warnings, "mode": mode}), 400
 
         # Step 2: Quick validate each file (Phase 1)
         validation_results = []
@@ -409,14 +411,14 @@ def api_import_file():
                 "error": "All files failed validation.",
                 "batch_id": batch_id,
                 "validation": validation_results,
-                "warnings": warnings
+                "warnings": warnings,
+                "mode": mode
             }), 400
 
-        # ========== MODE CHECK: QUICK VALIDATION ONLY ==========
+        # ========== MODE HANDLING ==========
         if mode == 'quick':
-            # Update job as completed for quick mode
+            # Only quick validation, no async import
             data_manager.update_job_status(batch_id, status='completed', total_rows=total_rows)
-            # Cleanup all files immediately
             for fp in all_file_paths:
                 try:
                     os.remove(fp)
@@ -428,8 +430,6 @@ def api_import_file():
                     shutil.rmtree(td, ignore_errors=True)
                 except:
                     pass
-            
-            # Return validation results
             return jsonify({
                 "success": True,
                 "mode": "quick",
@@ -438,38 +438,55 @@ def api_import_file():
                 "validation": validation_results,
                 "warnings": warnings
             }), 200
-
-        # ========== MODE CHECK: FULL PROCESS ==========
-        
-        # Update job with total rows
-        data_manager.update_job_status(batch_id, total_rows=total_rows)
-
-        # Step 4: Start background thread (Phase 2)
-        thread = threading.Thread(
-            target=data_manager.process_import_async,
-            args=(valid_files, table_name, batch_id, temp_dirs),
-            daemon=True
-        )
-        thread.start()
-
-        # Return immediately with batch_id
-        filenames = [os.path.basename(fp) for fp in valid_files]
-        return jsonify({
-            "success": True,
-            "mode": "full",
-            "data": {
+        elif mode == 'full':
+            # Only async import, skip quick validation result in response
+            data_manager.update_job_status(batch_id, total_rows=total_rows)
+            thread = threading.Thread(
+                target=data_manager.process_import_async,
+                args=(valid_files, table_name, batch_id, temp_dirs),
+                daemon=True
+            )
+            thread.start()
+            filenames = [os.path.basename(fp) for fp in valid_files]
+            return jsonify({
+                "success": True,
+                "mode": "full",
+                "data": {
+                    "batch_id": batch_id,
+                    "status": "pending",
+                    "total_rows": total_rows,
+                    "files": filenames,
+                    "validation": validation_results,
+                    "warnings": warnings,
+                    "message": "Import job started. Use GET /api/jobs/<batch_id> to check progress."
+                }
+            }), 202
+        else:  # mode == 'both' (missing/invalid)
+            # Do both: quick validation response, then async import
+            data_manager.update_job_status(batch_id, total_rows=total_rows)
+            thread = threading.Thread(
+                target=data_manager.process_import_async,
+                args=(valid_files, table_name, batch_id, temp_dirs),
+                daemon=True
+            )
+            thread.start()
+            filenames = [os.path.basename(fp) for fp in valid_files]
+            return jsonify({
+                "success": True,
+                "mode": "both",
                 "batch_id": batch_id,
-                "status": "pending",
-                "total_rows": total_rows,
-                "files": filenames,
+                "message": "Quick validation completed. Import job started.",
                 "validation": validation_results,
                 "warnings": warnings,
-                "message": "Import job started. Use GET /api/jobs/<batch_id> to check progress."
-            }
-        }), 202
+                "data": {
+                    "status": "pending",
+                    "total_rows": total_rows,
+                    "files": filenames,
+                    "message": "Import job started. Use GET /api/jobs/<batch_id> to check progress."
+                }
+            }), 200
 
     except Exception as e:
-        # Cleanup on unexpected error
         for fp in all_file_paths:
             try:
                 os.remove(fp)
@@ -481,7 +498,7 @@ def api_import_file():
                 shutil.rmtree(td, ignore_errors=True)
             except:
                 pass
-        return jsonify({"success": False, "error": f"Server error: {str(e)}"}), 500
+        return jsonify({"success": False, "error": f"Server error: {str(e)}", "mode": mode}), 500
 
 
 @app.route('/api/jobs', methods=['GET'])
