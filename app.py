@@ -410,7 +410,7 @@ def api_import_file():
                 "success": False,
                 "error": "All files failed validation.",
                 "batch_id": batch_id,
-                "validation": validation_results,
+                "files": validation_results,
                 "warnings": warnings,
                 "mode": mode
             }), 400
@@ -435,7 +435,7 @@ def api_import_file():
                 "mode": "quick",
                 "batch_id": batch_id,
                 "message": "Quick validation completed.",
-                "validation": validation_results,
+                "files": validation_results,
                 "warnings": warnings
             }), 200
         elif mode == 'full':
@@ -476,7 +476,7 @@ def api_import_file():
                 "mode": "both",
                 "batch_id": batch_id,
                 "message": "Quick validation completed. Import job started.",
-                "validation": validation_results,
+                "files": validation_results,
                 "warnings": warnings,
                 "data": {
                     "status": "pending",
