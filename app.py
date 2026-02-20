@@ -497,7 +497,51 @@ def api_import_file():
                 }
             }), 202
         else:  # mode == 'both' (missing/invalid)
-            # Do both: quick validation response, then async import
+            # Create a job row for EACH file with file size
+            for fp in all_file_paths:
+                file_size = os.path.getsize(fp)
+                fname = os.path.basename(fp)
+                data_manager.create_import_job(batch_id, fname, dist_id, file_size=file_size)
+
+            # Quick validate each file
+            for fp in all_file_paths:
+                fname = os.path.basename(fp)
+                is_valid, error_msg, row_count = data_manager.quick_validate_file(fp, table_name)
+                if is_valid:
+                    valid_files.append(fp)
+                    total_rows += row_count
+                    validation_results.append({"filename": fname, "valid": True, "rows": row_count})
+                else:
+                    validation_results.append({"filename": fname, "valid": False, "error": error_msg})
+                    # Update the existing job row for this file as failed
+                    # data_manager.update_job_status(batch_id, filename=fname, status='6',
+                    #     error_count=1, error_details=[f"Quick validation failed: {error_msg}"])
+
+            # Check if all files failed validation
+            if not valid_files:
+                # Cleanup only
+                for fp in all_file_paths:
+                    try:
+                        os.remove(fp)
+                    except:
+                        pass
+                for td in temp_dirs:
+                    try:
+                        import shutil
+                        shutil.rmtree(td, ignore_errors=True)
+                    except:
+                        pass
+                data_manager.update_job_status(batch_id, status='2', message=error_msg)
+                return jsonify({
+                    "success": False,
+                    "error": "All files failed validation.",
+                    "batch_id": batch_id,
+                    "files": validation_results,
+                    "warnings": warnings,
+                    "mode": mode
+                }), 400
+
+            # Start async import thread
             data_manager.update_job_status(batch_id, total_rows=total_rows)
             thread = threading.Thread(
                 target=data_manager.process_import_async,
