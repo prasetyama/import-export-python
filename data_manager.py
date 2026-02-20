@@ -584,7 +584,7 @@ def update_job_status(batch_id, filename=None, status=None, total_rows=None, pro
             updates.append("message = %s")
             params.append(error_details)
             
-        if status in ('3', '5'):
+        if status in ('3', '5', '9'):
             updates.append("update_process = NOW()")
 
         if not updates:
