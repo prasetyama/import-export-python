@@ -375,7 +375,7 @@ def api_import_file():
         # Create a job row for EACH file
         for fp in all_file_paths:
             fname = os.path.basename(fp)
-            data_manager.create_import_job(batch_id, fname, table_name)
+            data_manager.create_import_job(batch_id, fname)
 
         for fp in all_file_paths:
             fname = os.path.basename(fp)
@@ -387,7 +387,7 @@ def api_import_file():
             else:
                 validation_results.append({"filename": fname, "valid": False, "error": error_msg})
                 # Update the existing job row for this file as failed
-                data_manager.update_job_status(batch_id, filename=fname, status='failed',
+                data_manager.update_job_status(batch_id, filename=fname, status='6',
                     error_count=1, error_details=[f"Quick validation failed: {error_msg}"])
 
         # Check if all files failed validation
@@ -416,7 +416,7 @@ def api_import_file():
         # ========== MODE HANDLING ==========
         if mode == 'quick':
             # Only quick validation, no async import
-            data_manager.update_job_status(batch_id, status='completed', total_rows=total_rows)
+            # data_manager.update_job_status(batch_id, status='5', total_rows=total_rows)
             for fp in all_file_paths:
                 try:
                     os.remove(fp)

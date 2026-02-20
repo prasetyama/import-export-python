@@ -524,15 +524,15 @@ def import_multiple_files(file_paths, table_name='auto'):
 
 # ==================== IMPORT JOB TRACKING ====================
 
-def create_import_job(batch_id, filename, table_name):
+def create_import_job(batch_id, filename):
     """Creates a new import job record in the database."""
     connection = get_connection()
     if not connection: return None
     try:
         cursor = connection.cursor()
         cursor.execute(
-            "INSERT INTO import_jobs (batch_id, filename, table_name, status) VALUES (%s, %s, %s, 'pending')",
-            (batch_id, filename, table_name)
+            "INSERT INTO upload_logs (file_type, file_name, status, file_name_zip, created_at) VALUES (%s, %s, '3', %s, NOW())",
+            (filename, filename, batch_id)
         )
         connection.commit()
         return batch_id
@@ -559,26 +559,26 @@ def update_job_status(batch_id, filename=None, status=None, total_rows=None, pro
         if status:
             updates.append("status = %s")
             params.append(status)
-        if total_rows is not None:
-            updates.append("total_rows = %s")
-            params.append(total_rows)
-        if processed_rows is not None:
-            updates.append("processed_rows = %s")
-            params.append(processed_rows)
-        if success_count is not None:
-            updates.append("success_count = %s")
-            params.append(success_count)
-        if error_count is not None:
-            updates.append("error_count = %s")
-            params.append(error_count)
+        # if total_rows is not None:
+        #     updates.append("total_rows = %s")
+        #     params.append(total_rows)
+        # if processed_rows is not None:
+        #     updates.append("processed_rows = %s")
+        #     params.append(processed_rows)
+        # if success_count is not None:
+        #     updates.append("success_count = %s")
+        #     params.append(success_count)
+        # if error_count is not None:
+        #     updates.append("error_count = %s")
+        #     params.append(error_count)
         if error_details:
             if isinstance(error_details, list):
                 error_details = json.dumps(error_details)
-            updates.append("error_details = %s")
+            updates.append("message = %s")
             params.append(error_details)
             
-        if status in ('completed', 'failed'):
-            updates.append("completed_at = NOW()")
+        if status in ('3', '5'):
+            updates.append("update_process = NOW()")
 
         if not updates:
             return True
@@ -586,10 +586,10 @@ def update_job_status(batch_id, filename=None, status=None, total_rows=None, pro
         if filename:
             params.append(batch_id)
             params.append(filename)
-            query = f"UPDATE import_jobs SET {', '.join(updates)} WHERE batch_id = %s AND filename = %s"
+            query = f"UPDATE upload_logs SET {', '.join(updates)} WHERE file_name_zip = %s AND file_name = %s"
         else:
             params.append(batch_id)
-            query = f"UPDATE import_jobs SET {', '.join(updates)} WHERE batch_id = %s"
+            query = f"UPDATE upload_logs SET {', '.join(updates)} WHERE file_name_zip = %s"
 
         cursor.execute(query, tuple(params))
         connection.commit()
