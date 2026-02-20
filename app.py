@@ -150,6 +150,7 @@ def import_file():
         return redirect(url_for('index'))
 
     table_name = request.form.get('table_name', 'auto')
+    dist_id = request.form.get('dist_id', None) 
     all_file_paths = []
     temp_dirs = []
     warnings = []
@@ -209,7 +210,7 @@ def import_file():
         # Create a job row for EACH file
         for fp in all_file_paths:
             fname = os.path.basename(fp)
-            data_manager.create_import_job(batch_id, fname, table_name)
+            data_manager.create_import_job(batch_id, fname, table_name, dist_id)
 
         for fp in all_file_paths:
             fname = os.path.basename(fp)
@@ -320,6 +321,7 @@ def api_import_file():
         return jsonify({"success": False, "error": "No files provided.", "mode": mode}), 400
 
     table_name = request.form.get('table_name', 'auto')
+    dist_id = request.form.get('dist_id', None)
     all_file_paths = []
     temp_dirs = []
     warnings = []
@@ -435,7 +437,7 @@ def api_import_file():
             # Create a job row for EACH file
             for fp in all_file_paths:
                 fname = os.path.basename(fp)
-                data_manager.create_import_job(batch_id, fname)
+                data_manager.create_import_job(batch_id, fname, dist_id)
 
             for fp in all_file_paths:
                 fname = os.path.basename(fp)
