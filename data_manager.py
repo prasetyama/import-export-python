@@ -822,7 +822,7 @@ def get_job_file_details(batch_id):
             connection.close()
 
 
-def quick_validate_file(filepath, table_name):
+def quick_validate_file(filepath, table_name, dist_id=None):
     """
     Quick validation: checks file extension, headers, and basic rules.
     """
@@ -875,6 +875,29 @@ def quick_validate_file(filepath, table_name):
 
         if missing_required:
             return False, f"Missing mandatory columns: {', '.join(missing_required)}", total_rows
+
+        # dist_id prefix validation (first 2 digits)
+        if dist_id and str(dist_id).strip():
+            target_prefix = str(dist_id).strip()[:2]
+            
+            # Find the actual column in DF that maps to 'distid' (database column name)
+            distid_col_in_df = None
+            # We look for 'distid' key in configs or any case-insensitive variation if 'distid' is common
+            search_key = 'DISTID'
+            if search_key in configs:
+                aliases = configs[search_key]['aliases']
+                for alias in aliases:
+                    if alias in df.columns:
+                        distid_col_in_df = alias
+                        break
+            
+            if distid_col_in_df:
+                # Check first 5 rows for prefix match
+                sample_dist = df.head(5)[distid_col_in_df].dropna().astype(str)
+                for val in sample_dist:
+                    val_clean = val.strip()
+                    if val_clean and val_clean[:2] != target_prefix:
+                        return False, f"DistID value does not match expected prefix '{target_prefix}' for dist_id '{dist_id}'. Found value: '{val_clean}'", total_rows
 
         # Validate first 2 data rows (basic type check)
         sample = df.head(2)

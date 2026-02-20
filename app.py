@@ -214,7 +214,7 @@ def import_file():
 
         for fp in all_file_paths:
             fname = os.path.basename(fp)
-            is_valid, error_msg, row_count = data_manager.quick_validate_file(fp, table_name)
+            is_valid, error_msg, row_count = data_manager.quick_validate_file(fp, table_name, dist_id)
             if is_valid:
                 valid_files.append(fp)
                 total_rows += row_count
@@ -381,7 +381,7 @@ def api_import_file():
 
             for fp in all_file_paths:
                 fname = os.path.basename(fp)
-                is_valid, error_msg, row_count = data_manager.quick_validate_file(fp, table_name)
+                is_valid, error_msg, row_count = data_manager.quick_validate_file(fp, table_name, dist_id)
                 if is_valid:
                     valid_files.append(fp)
                     total_rows += row_count
@@ -442,7 +442,7 @@ def api_import_file():
 
             for fp in all_file_paths:
                 fname = os.path.basename(fp)
-                is_valid, error_msg, row_count = data_manager.quick_validate_file(fp, table_name)
+                is_valid, error_msg, row_count = data_manager.quick_validate_file(fp, table_name, dist_id)
                 if is_valid:
                     valid_files.append(fp)
                     total_rows += row_count
@@ -506,7 +506,7 @@ def api_import_file():
             # Quick validate each file
             for fp in all_file_paths:
                 fname = os.path.basename(fp)
-                is_valid, error_msg, row_count = data_manager.quick_validate_file(fp, table_name)
+                is_valid, error_msg, row_count = data_manager.quick_validate_file(fp, table_name, dist_id)
                 if is_valid:
                     valid_files.append(fp)
                     total_rows += row_count
