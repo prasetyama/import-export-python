@@ -524,7 +524,7 @@ def import_multiple_files(file_paths, table_name='auto'):
 
 # ==================== IMPORT JOB TRACKING ====================
 
-def create_import_job(batch_id, filename, dist_id=None):
+def create_import_job(batch_id, filename, dist_id=None, file_size=None):
     """Creates a new import job record in the database."""
     print(f"Creating job for batch_id: {batch_id}, filename: {filename}")
     connection = get_connection()
@@ -532,8 +532,8 @@ def create_import_job(batch_id, filename, dist_id=None):
     try:
         cursor = connection.cursor()
         cursor.execute(
-            "INSERT INTO upload_logs (file_type, file_name, status, file_name_zip, distid, created_at) VALUES (%s, %s, '3', %s, %s, NOW())",
-            (filename, filename, batch_id, dist_id)
+            "INSERT INTO upload_logs (file_type, file_name, file_size, status, file_name_zip, distid, created_at) VALUES (%s, %s, %s, '3', %s, %s, NOW())",
+            (filename, filename, file_size, batch_id, dist_id)
         )
         connection.commit()
         return batch_id
@@ -584,7 +584,7 @@ def update_job_status(batch_id, filename=None, status=None, total_rows=None, pro
             updates.append("message = %s")
             params.append(error_details)
             
-        if status in ('3', '5', '9'):
+        if status in ('2','3', '5', '9'):
             updates.append("update_process = NOW()")
 
         if not updates:

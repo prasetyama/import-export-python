@@ -436,8 +436,9 @@ def api_import_file():
         elif mode == 'full':
             # Create a job row for EACH file
             for fp in all_file_paths:
+                file_size = os.path.getsize(fp)
                 fname = os.path.basename(fp)
-                data_manager.create_import_job(batch_id, fname, dist_id)
+                data_manager.create_import_job(batch_id, fname, dist_id, file_size=file_size)
 
             for fp in all_file_paths:
                 fname = os.path.basename(fp)
