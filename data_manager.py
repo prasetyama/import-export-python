@@ -545,17 +545,18 @@ def create_import_job(batch_id, filename, table_name):
             connection.close()
 
 
-def update_job_status(batch_id, status=None, total_rows=None, processed_rows=None,
+def update_job_status(batch_id, filename=None, status=None, total_rows=None, processed_rows=None,
                       success_count=None, error_count=None, error_details=None):
-    """Updates import job progress fields."""
+    """Updates the status of an import job (or specific file in a batch)."""
     connection = get_connection()
     if not connection: return False
     try:
         cursor = connection.cursor()
+        
         updates = []
         params = []
-
-        if status is not None:
+        
+        if status:
             updates.append("status = %s")
             params.append(status)
         if total_rows is not None:
@@ -570,22 +571,31 @@ def update_job_status(batch_id, status=None, total_rows=None, processed_rows=Non
         if error_count is not None:
             updates.append("error_count = %s")
             params.append(error_count)
-        if error_details is not None:
+        if error_details:
+            if isinstance(error_details, list):
+                error_details = json.dumps(error_details)
             updates.append("error_details = %s")
-            params.append(json.dumps(error_details))
+            params.append(error_details)
+            
         if status in ('completed', 'failed'):
             updates.append("completed_at = NOW()")
 
         if not updates:
             return True
 
-        params.append(batch_id)
-        query = f"UPDATE import_jobs SET {', '.join(updates)} WHERE batch_id = %s"
+        if filename:
+            params.append(batch_id)
+            params.append(filename)
+            query = f"UPDATE import_jobs SET {', '.join(updates)} WHERE batch_id = %s AND filename = %s"
+        else:
+            params.append(batch_id)
+            query = f"UPDATE import_jobs SET {', '.join(updates)} WHERE batch_id = %s"
+
         cursor.execute(query, tuple(params))
         connection.commit()
         return True
     except Error as e:
-        print(f"Error updating job: {e}")
+        print(f"Error updating job status: {e}")
         return False
     finally:
         if connection and connection.is_connected():
@@ -593,23 +603,93 @@ def update_job_status(batch_id, status=None, total_rows=None, processed_rows=Non
             connection.close()
 
 
+def _aggregate_job_rows(rows):
+    """Helper to aggregate multiple rows for the same batch_id."""
+    if not rows:
+        return None
+        
+    first = rows[0]
+    batch_id = first['batch_id']
+    
+    total_rows = 0
+    processed_rows = 0
+    success_count = 0
+    error_count = 0
+    all_error_details = []
+    
+    statuses = set()
+    files_list = []
+    
+    for r in rows:
+        total_rows += r.get('total_rows') or 0
+        processed_rows += r.get('processed_rows') or 0
+        success_count += r.get('success_count') or 0
+        error_count += r.get('error_count') or 0
+        
+        errs = r.get('error_details')
+        if errs:
+            if isinstance(errs, str):
+                try:
+                    errs = json.loads(errs)
+                except:
+                    pass
+            if isinstance(errs, list):
+                formatted_err = {"filename": r['filename'], "errors": errs}
+                all_error_details.append(formatted_err)
+        
+        statuses.add(r['status'])
+        
+        files_list.append({
+            "filename": r['filename'],
+            "status": r['status'],
+            "total_rows": r.get('total_rows'),
+            "processed_rows": r.get('processed_rows'),
+            "error_count": r.get('error_count'),
+        })
+
+    # Determine aggregate status
+    if 'processing' in statuses:
+        agg_status = 'processing'
+    elif 'pending' in statuses:
+        if len(statuses) > 1: agg_status = 'processing'
+        else: agg_status = 'pending'
+    elif 'failed' in statuses and 'completed' not in statuses:
+        agg_status = 'failed'
+    elif 'failed' in statuses and 'completed' in statuses:
+         agg_status = 'completed_with_errors'
+    else:
+        agg_status = 'completed'
+
+    job = {
+        "batch_id": batch_id,
+        "table_name": first['table_name'],
+        "status": agg_status,
+        "total_rows": total_rows,
+        "processed_rows": processed_rows,
+        "success_count": success_count,
+        "error_count": error_count,
+        "error_details": all_error_details,
+        "files": files_list,
+        "created_at": first['created_at'],
+        "completed_at": first.get('completed_at')
+    }
+
+    # Date formatting
+    for key in ('created_at', 'completed_at'):
+        if job.get(key) and hasattr(job[key], 'isoformat'):
+            job[key] = job[key].isoformat()
+            
+    return job
+
 def get_job(batch_id):
-    """Gets a single import job by batch_id."""
+    """Gets a single import job by batch_id, aggregating multiple file rows."""
     connection = get_connection()
     if not connection: return None
     try:
         cursor = connection.cursor(dictionary=True)
         cursor.execute("SELECT * FROM import_jobs WHERE batch_id = %s", (batch_id,))
-        job = cursor.fetchone()
-        if job and job.get('error_details'):
-            if isinstance(job['error_details'], str):
-                job['error_details'] = json.loads(job['error_details'])
-        # Convert datetime to string for JSON serialization
-        if job:
-            for key in ('created_at', 'completed_at'):
-                if job.get(key):
-                    job[key] = job[key].isoformat()
-        return job
+        rows = cursor.fetchall()
+        return _aggregate_job_rows(rows)
     except Error as e:
         print(f"Error getting job: {e}")
         return None
@@ -619,21 +699,32 @@ def get_job(batch_id):
             connection.close()
 
 
-def get_all_jobs(limit=50):
-    """Gets all import jobs, most recent first."""
+def get_all_jobs(limit=100):
+    """Gets all import jobs, grouped by batch_id."""
     connection = get_connection()
     if not connection: return []
     try:
         cursor = connection.cursor(dictionary=True)
-        cursor.execute("SELECT * FROM import_jobs ORDER BY created_at DESC LIMIT %s", (limit,))
-        jobs = cursor.fetchall()
-        for job in jobs:
-            if job.get('error_details') and isinstance(job['error_details'], str):
-                job['error_details'] = json.loads(job['error_details'])
-            for key in ('created_at', 'completed_at'):
-                if job.get(key):
-                    job[key] = job[key].isoformat()
-        return jobs
+        # Fetch individual rows, but we need enough to find unique batches
+        cursor.execute("SELECT * FROM import_jobs ORDER BY created_at DESC LIMIT %s", (limit * 2,))
+        all_rows = cursor.fetchall()
+        
+        # Group by batch_id preserving order of appearance (most recent created_at first)
+        batches = {}
+        batch_order = []
+        for r in all_rows:
+            bid = r['batch_id']
+            if bid not in batches:
+                batches[bid] = []
+                batch_order.append(bid)
+            batches[bid].append(r)
+            
+        aggregated_jobs = []
+        for bid in batch_order:
+            if len(aggregated_jobs) >= limit: break
+            aggregated_jobs.append(_aggregate_job_rows(batches[bid]))
+            
+        return aggregated_jobs
     except Error as e:
         print(f"Error getting jobs: {e}")
         return []
@@ -824,18 +915,15 @@ def process_import_async(file_paths, table_name, batch_id, temp_dirs=None):
     Cleans up files when done.
     """
     try:
-        update_job_status(batch_id, status='processing')
-
-        all_errors = []
-        total_success = 0
-        total_errors = 0
-        total_processed = 0
-
+        # NO global 'processing' status update here, as files are already created in 'pending' or 'failed'.
+        
         for filepath in file_paths:
             fname = os.path.basename(filepath)
-            create_job_detail(batch_id, fname)
+            
             try:
-                update_job_detail(batch_id, fname, status='processing')
+                # Mark file as processing
+                update_job_status(batch_id, filename=fname, status='processing')
+                
                 if table_name and table_name != 'auto':
                     result, messages = import_file_process(filepath, table_name)
                 else:
@@ -843,62 +931,46 @@ def process_import_async(file_paths, table_name, batch_id, temp_dirs=None):
 
                 file_success = 0
                 file_errors = []
+                file_status = 'failed'
+                
                 if result:
                     file_success = messages.get('success_count', 0) if isinstance(messages, dict) else 0
                     file_errors = messages.get('errors', []) if isinstance(messages, dict) else []
-                    total_success += file_success
-                    total_errors += len(file_errors)
-                    total_processed += file_success + len(file_errors)
-                    if file_errors:
-                        all_errors.extend([f"{fname}: {e}" for e in file_errors])
+                    
+                    if not file_errors: 
+                        file_status = 'completed'
+                    else:
+                        file_status = 'completed' # Logic: completed processing the file. Errors are details.
                 else:
                     error_msgs = messages if isinstance(messages, list) else [str(messages)]
-                    total_errors += 1
-                    total_processed += 1
-                    all_errors.extend([f"{fname}: {e}" for e in error_msgs])
                     file_errors = error_msgs
+                    file_status = 'failed'
 
-                # Update per-file status
-                file_status = 'completed' if result and not file_errors else ('completed' if result else 'failed')
-                update_job_detail(
-                    batch_id, fname, 
+                # Update final status for this file
+                update_job_status(
+                    batch_id, 
+                    filename=fname, 
                     status=file_status, 
                     success_count=file_success, 
-                    error_count=len(file_errors) if isinstance(file_errors, list) else 1,
-                    error_details=file_errors
-                )
-
-                # Update progress after each file
-                update_job_status(
-                    batch_id,
-                    processed_rows=total_processed,
-                    success_count=total_success,
-                    error_count=total_errors,
-                    error_details=all_errors if all_errors else None
+                    error_count=len(file_errors),
+                    error_details=file_errors if file_errors else None,
+                    processed_rows=(file_success + len(file_errors)),
+                    total_rows=(file_success + len(file_errors))
                 )
 
             except Exception as e:
-                fname = os.path.basename(filepath)
-                all_errors.append(f"{fname}: Unexpected error: {str(e)}")
-                total_errors += 1
-
-        # Final status
-        final_status = 'completed' if total_success > 0 else 'failed'
-        update_job_status(
-            batch_id,
-            status=final_status,
-            processed_rows=total_processed,
-            success_count=total_success,
-            error_count=total_errors,
-            error_details=all_errors if all_errors else None
-        )
+                # File level exception
+                update_job_status(
+                    batch_id, 
+                    filename=fname, 
+                    status='failed',
+                    error_count=1,
+                    error_details=[f"Unexpected error processing file: {str(e)}"]
+                )
 
     except Exception as e:
-        update_job_status(
-            batch_id,
-            status='failed',
-            error_details=[f"Fatal error: {str(e)}"]
-        )
+        print(f"Batch level error in process_import_async: {e}")
+        pass
     finally:
         # Cleanup files
         for fp in file_paths:

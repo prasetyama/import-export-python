@@ -205,8 +205,11 @@ def import_file():
 
         # Generate single batch_id for entire upload
         batch_id = str(uuid.uuid4())
-        all_filenames = [os.path.basename(fp) for fp in all_file_paths]
-        data_manager.create_import_job(batch_id, ', '.join(all_filenames), table_name)
+        
+        # Create a job row for EACH file
+        for fp in all_file_paths:
+            fname = os.path.basename(fp)
+            data_manager.create_import_job(batch_id, fname, table_name)
 
         for fp in all_file_paths:
             fname = os.path.basename(fp)
@@ -217,15 +220,11 @@ def import_file():
                 validation_results.append({"filename": fname, "valid": True, "rows": row_count})
             else:
                 validation_results.append({"filename": fname, "valid": False, "error": error_msg})
-                # Create a failed import job for this file
-                data_manager.create_import_job(batch_id, fname, table_name)
-                data_manager.update_job_status(batch_id, status='failed', 
+                # Update the existing job row for this file as failed
+                data_manager.update_job_status(batch_id, filename=fname, status='failed', 
                     error_count=1, error_details=[f"Quick validation failed: {error_msg}"])
         if not valid_files:
-            # Semua file gagal validasi -> update job as failed & cleanup
-            failed_errors = [f"{v['filename']}: {v.get('error', 'Validation failed.')}" for v in validation_results if not v['valid']]
-            data_manager.update_job_status(batch_id, status='failed',
-                error_count=len(failed_errors), error_details=failed_errors)
+            # Cleanup only, no need for global batch update as individual rows are already marked failed.
             for fp in all_file_paths:
                 try:
                     os.remove(fp)
@@ -251,9 +250,9 @@ def import_file():
             else:
                 flash(f"❌ {v['filename']}: {v.get('error', 'Validation failed.')}")
 
-        # ========== Step 3: Update job & start async processing ==========
-        data_manager.update_job_status(batch_id, total_rows=total_rows)
-
+        # ========== Step 3: Update processed rows tracking if needed & start async processing ==========
+        # (Total rows are updated per-file during async or already set if we want)
+        
         # ========== Step 4: Jalankan proses async ==========
         thread = threading.Thread(
             target=data_manager.process_import_async,
@@ -372,8 +371,11 @@ def api_import_file():
 
         # Generate single batch_id for entire upload
         batch_id = str(uuid.uuid4())
-        all_filenames = [os.path.basename(fp) for fp in all_file_paths]
-        data_manager.create_import_job(batch_id, ', '.join(all_filenames), table_name)
+        
+        # Create a job row for EACH file
+        for fp in all_file_paths:
+            fname = os.path.basename(fp)
+            data_manager.create_import_job(batch_id, fname, table_name)
 
         for fp in all_file_paths:
             fname = os.path.basename(fp)
@@ -384,17 +386,13 @@ def api_import_file():
                 validation_results.append({"filename": fname, "valid": True, "rows": row_count})
             else:
                 validation_results.append({"filename": fname, "valid": False, "error": error_msg})
-                # Create a failed import job for this file
-                data_manager.create_import_job(batch_id, fname, table_name)
-                data_manager.update_job_status(batch_id, status='failed',
+                # Update the existing job row for this file as failed
+                data_manager.update_job_status(batch_id, filename=fname, status='failed',
                     error_count=1, error_details=[f"Quick validation failed: {error_msg}"])
 
         # Check if all files failed validation
         if not valid_files:
-            # All files failed — update job as failed & cleanup
-            failed_errors = [f"{v['filename']}: {v.get('error', 'Validation failed.')}" for v in validation_results if not v['valid']]
-            data_manager.update_job_status(batch_id, status='failed',
-                error_count=len(failed_errors), error_details=failed_errors)
+            # Cleanup only
             for fp in all_file_paths:
                 try:
                     os.remove(fp)
