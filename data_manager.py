@@ -526,6 +526,7 @@ def import_multiple_files(file_paths, table_name='auto'):
 
 def create_import_job(batch_id, filename):
     """Creates a new import job record in the database."""
+    print(f"Creating job for batch_id: {batch_id}, filename: {filename}")
     connection = get_connection()
     if not connection: return None
     try:
@@ -546,7 +547,7 @@ def create_import_job(batch_id, filename):
 
 
 def update_job_status(batch_id, filename=None, status=None, total_rows=None, processed_rows=None,
-                      success_count=None, error_count=None, error_details=None):
+                      success_count=None, error_count=None, error_details=None, message=None, notes=None):
     """Updates the status of an import job (or specific file in a batch)."""
     connection = get_connection()
     if not connection: return False
@@ -571,6 +572,12 @@ def update_job_status(batch_id, filename=None, status=None, total_rows=None, pro
         # if error_count is not None:
         #     updates.append("error_count = %s")
         #     params.append(error_count)
+        if message:
+            updates.append("message = %s")
+            params.append(message)
+        if notes:
+            updates.append("notes = %s")
+            params.append(notes)
         if error_details:
             if isinstance(error_details, list):
                 error_details = json.dumps(error_details)
@@ -936,15 +943,18 @@ def process_import_async(file_paths, table_name, batch_id, temp_dirs=None):
                 if result:
                     file_success = messages.get('success_count', 0) if isinstance(messages, dict) else 0
                     file_errors = messages.get('errors', []) if isinstance(messages, dict) else []
+                    notes = f"Berhasil memproses {(file_success + len(file_errors))} data"
+                    message = f"File uploaded successfully"
                     
                     if not file_errors: 
-                        file_status = 'completed'
+                        file_status = '9'
                     else:
-                        file_status = 'completed' # Logic: completed processing the file. Errors are details.
+                        file_status = '9' # Logic: completed processing the file. Errors are details.
                 else:
                     error_msgs = messages if isinstance(messages, list) else [str(messages)]
                     file_errors = error_msgs
                     file_status = 'failed'
+                    messages= error_msgs[0] if error_msgs else "File processing failed."
 
                 # Update final status for this file
                 update_job_status(
@@ -955,7 +965,9 @@ def process_import_async(file_paths, table_name, batch_id, temp_dirs=None):
                     error_count=len(file_errors),
                     error_details=file_errors if file_errors else None,
                     processed_rows=(file_success + len(file_errors)),
-                    total_rows=(file_success + len(file_errors))
+                    total_rows=(file_success + len(file_errors)),
+                    message=message,
+                    notes=notes
                 )
 
             except Exception as e:

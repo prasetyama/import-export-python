@@ -371,52 +371,47 @@ def api_import_file():
 
         # Generate single batch_id for entire upload
         batch_id = str(uuid.uuid4())
-        
-        # Create a job row for EACH file
-        for fp in all_file_paths:
-            fname = os.path.basename(fp)
-            data_manager.create_import_job(batch_id, fname)
-
-        for fp in all_file_paths:
-            fname = os.path.basename(fp)
-            is_valid, error_msg, row_count = data_manager.quick_validate_file(fp, table_name)
-            if is_valid:
-                valid_files.append(fp)
-                total_rows += row_count
-                validation_results.append({"filename": fname, "valid": True, "rows": row_count})
-            else:
-                validation_results.append({"filename": fname, "valid": False, "error": error_msg})
-                # Update the existing job row for this file as failed
-                data_manager.update_job_status(batch_id, filename=fname, status='6',
-                    error_count=1, error_details=[f"Quick validation failed: {error_msg}"])
-
-        # Check if all files failed validation
-        if not valid_files:
-            # Cleanup only
-            for fp in all_file_paths:
-                try:
-                    os.remove(fp)
-                except:
-                    pass
-            for td in temp_dirs:
-                try:
-                    import shutil
-                    shutil.rmtree(td, ignore_errors=True)
-                except:
-                    pass
-            return jsonify({
-                "success": False,
-                "error": "All files failed validation.",
-                "batch_id": batch_id,
-                "files": validation_results,
-                "warnings": warnings,
-                "mode": mode
-            }), 400
 
         # ========== MODE HANDLING ==========
         if mode == 'quick':
             # Only quick validation, no async import
             # data_manager.update_job_status(batch_id, status='5', total_rows=total_rows)
+
+            for fp in all_file_paths:
+                fname = os.path.basename(fp)
+                is_valid, error_msg, row_count = data_manager.quick_validate_file(fp, table_name)
+                if is_valid:
+                    valid_files.append(fp)
+                    total_rows += row_count
+                    validation_results.append({"filename": fname, "valid": True, "rows": row_count})
+                else:
+                    validation_results.append({"filename": fname, "valid": False, "error": error_msg})
+                    # Update the existing job row for this file as failed
+                    # data_manager.update_job_status(batch_id, filename=fname, status='6',
+                    #     error_count=1, error_details=[f"Quick validation failed: {error_msg}"])
+
+            # Check if all files failed validation
+            if not valid_files:
+                # Cleanup only
+                for fp in all_file_paths:
+                    try:
+                        os.remove(fp)
+                    except:
+                        pass
+                for td in temp_dirs:
+                    try:
+                        import shutil
+                        shutil.rmtree(td, ignore_errors=True)
+                    except:
+                        pass
+                return jsonify({
+                    "success": False,
+                    "error": "All files failed validation.",
+                    "batch_id": batch_id,
+                    "files": validation_results,
+                    "warnings": warnings,
+                    "mode": mode
+                }), 400
             for fp in all_file_paths:
                 try:
                     os.remove(fp)
@@ -437,8 +432,47 @@ def api_import_file():
                 "warnings": warnings
             }), 200
         elif mode == 'full':
-            # Only async import, skip quick validation result in response
-            data_manager.update_job_status(batch_id, total_rows=total_rows)
+            # Create a job row for EACH file
+            for fp in all_file_paths:
+                fname = os.path.basename(fp)
+                data_manager.create_import_job(batch_id, fname)
+
+            for fp in all_file_paths:
+                fname = os.path.basename(fp)
+                is_valid, error_msg, row_count = data_manager.quick_validate_file(fp, table_name)
+                if is_valid:
+                    valid_files.append(fp)
+                    total_rows += row_count
+                    validation_results.append({"filename": fname, "valid": True, "rows": row_count})
+                else:
+                    validation_results.append({"filename": fname, "valid": False, "error": error_msg})
+                    # Update the existing job row for this file as failed
+                    # data_manager.update_job_status(batch_id, filename=fname, status='6',
+                    #     error_count=1, error_details=[f"Quick validation failed: {error_msg}"])
+
+            # Check if all files failed validation
+            if not valid_files:
+                # Cleanup only
+                for fp in all_file_paths:
+                    try:
+                        os.remove(fp)
+                    except:
+                        pass
+                for td in temp_dirs:
+                    try:
+                        import shutil
+                        shutil.rmtree(td, ignore_errors=True)
+                    except:
+                        pass
+                data_manager.update_job_status(batch_id, status='2', message=error_msg)
+                return jsonify({
+                    "success": False,
+                    "error": "All files failed validation.",
+                    "batch_id": batch_id,
+                    "files": validation_results,
+                    "warnings": warnings,
+                    "mode": mode
+                }), 400
             thread = threading.Thread(
                 target=data_manager.process_import_async,
                 args=(valid_files, table_name, batch_id, temp_dirs),
