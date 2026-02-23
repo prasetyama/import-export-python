@@ -523,6 +523,15 @@ def import_multiple_files(file_paths, table_name='auto'):
 
 
 # ==================== IMPORT JOB TRACKING ====================
+# "Skipped": 0,
+# "Uploaded": 1,
+# "Failed": 2,
+# "Waiting Process": 3,
+# "Validation Process": 4,
+# "Validasi Sukses": 5,
+# "Validasi Failed": 6,
+# "Processing Failed": 8,
+# "Processing Complete": 9,
 
 def create_import_job(batch_id, filename, dist_id=None, file_size=None):
     """Creates a new import job record in the database."""
@@ -735,27 +744,6 @@ def get_all_jobs(limit=100):
     except Error as e:
         print(f"Error getting jobs: {e}")
         return []
-    finally:
-        if connection and connection.is_connected():
-            cursor.close()
-            connection.close()
-
-
-def create_job_detail(batch_id, filename):
-    """Initializes a tracking record for an individual file in a batch."""
-    connection = get_connection()
-    if not connection: return False
-    try:
-        cursor = connection.cursor()
-        cursor.execute(
-            "INSERT INTO import_job_details (batch_id, filename, status) VALUES (%s, %s, 'pending')",
-            (batch_id, filename)
-        )
-        connection.commit()
-        return True
-    except Error as e:
-        print(f"Error creating job detail: {e}")
-        return False
     finally:
         if connection and connection.is_connected():
             cursor.close()
