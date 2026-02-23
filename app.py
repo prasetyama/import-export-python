@@ -222,7 +222,7 @@ def import_file():
             else:
                 validation_results.append({"filename": fname, "valid": False, "error": error_msg})
                 # Update the existing job row for this file as failed
-                data_manager.update_job_status(batch_id, filename=fname, status='failed', 
+                data_manager.update_job_status(batch_id, filename=fname, status='2', 
                     error_count=1, error_details=[f"Quick validation failed: {error_msg}"])
         if not valid_files:
             # Cleanup only, no need for global batch update as individual rows are already marked failed.
@@ -482,6 +482,8 @@ def api_import_file():
             )
             thread.start()
             filenames = [os.path.basename(fp) for fp in valid_files]
+
+            data_manager._check_missing_table_files(all_file_paths, batch_id, dist_id)
             return jsonify({
                 "success": True,
                 "mode": "full",
@@ -549,6 +551,8 @@ def api_import_file():
             )
             thread.start()
             filenames = [os.path.basename(fp) for fp in valid_files]
+
+            data_manager._check_missing_table_files(all_file_paths, batch_id, dist_id)
             return jsonify({
                 "success": True,
                 "mode": "both",

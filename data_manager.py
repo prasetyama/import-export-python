@@ -938,6 +938,62 @@ def quick_validate_file(filepath, table_name, dist_id=None):
         return False, f"Error reading file: {str(e)}", 0
 
 
+def _check_missing_table_files(all_file_paths, batch_id, dist_id):
+    """
+    Checks which import_tables have no matching uploaded file in all_file_paths.
+    For each missing table, creates a job entry via create_import_job with status '0'.
+    Returns a list of missing table dicts.
+    """
+    connection = get_connection()
+    if not connection:
+        return []
+
+    try:
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute("SELECT table_name, display_name, allowed_filename FROM import_tables WHERE allowed_filename != '' AND allowed_filename IS NOT NULL")
+        tables = cursor.fetchall()
+
+        if not tables:
+            return []
+
+        # Get uploaded filenames (without extension, lowercased)
+        uploaded_names = []
+        for fp in all_file_paths:
+            base_name = os.path.basename(fp)
+            name_only_lower = os.path.splitext(base_name)[0].lower()
+            uploaded_names.append(name_only_lower)
+
+        missing_tables = []
+        for table in tables:
+            allowed_list = [a.strip().lower() for a in table['allowed_filename'].split(',') if a.strip()]
+            # Check if any uploaded file matches this table's allowed filenames
+            has_match = any(name in allowed_list for name in uploaded_names)
+            if not has_match:
+                missing_filename = table['allowed_filename']
+                # Create job entry for the missing file
+                create_import_job(batch_id, table['display_name'], dist_id, 0)
+                update_job_status(
+                    batch_id,
+                    filename=table['display_name'],
+                    status='0',
+                    message="User skipped this step"
+                )
+                missing_tables.append({
+                    'table_name': table['table_name'],
+                    'display_name': table['display_name'],
+                    'allowed_filename': missing_filename
+                })
+
+        return missing_tables
+    except Error as e:
+        print(f"Error checking missing table files: {e}")
+        return []
+    finally:
+        if connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+
+
 def process_import_async(file_paths, table_name, batch_id, temp_dirs=None):
     """
     Background worker: processes all files for a batch job.
@@ -945,8 +1001,6 @@ def process_import_async(file_paths, table_name, batch_id, temp_dirs=None):
     Cleans up files when done.
     """
     try:
-        # NO global 'processing' status update here, as files are already created in 'pending' or 'failed'.
-        
         for filepath in file_paths:
             fname = os.path.basename(filepath)
             
@@ -961,7 +1015,9 @@ def process_import_async(file_paths, table_name, batch_id, temp_dirs=None):
 
                 file_success = 0
                 file_errors = []
-                file_status = 'failed'
+                file_status = '2'
+                message = ''
+                notes = ''
                 
                 if result:
                     file_success = messages.get('success_count', 0) if isinstance(messages, dict) else 0
@@ -976,8 +1032,8 @@ def process_import_async(file_paths, table_name, batch_id, temp_dirs=None):
                 else:
                     error_msgs = messages if isinstance(messages, list) else [str(messages)]
                     file_errors = error_msgs
-                    file_status = 'failed'
-                    messages= error_msgs[0] if error_msgs else "File processing failed."
+                    file_status = '2'
+                    message = error_msgs[0] if error_msgs else "File processing failed."
 
                 # Update final status for this file
                 update_job_status(
