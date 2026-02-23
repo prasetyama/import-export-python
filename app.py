@@ -450,8 +450,8 @@ def api_import_file():
                 else:
                     validation_results.append({"filename": fname, "valid": False, "error": error_msg})
                     # Update the existing job row for this file as failed
-                    # data_manager.update_job_status(batch_id, filename=fname, status='6',
-                    #     error_count=1, error_details=[f"Quick validation failed: {error_msg}"])
+                    data_manager.update_job_status(batch_id, filename=fname, status='2',
+                        error_count=1, error_details=[f"Quick validation failed: {error_msg}"])
 
             # Check if all files failed validation
             if not valid_files:
@@ -467,7 +467,6 @@ def api_import_file():
                         shutil.rmtree(td, ignore_errors=True)
                     except:
                         pass
-                data_manager.update_job_status(batch_id, status='2', message=error_msg)
                 return jsonify({
                     "success": False,
                     "error": "All files failed validation.",
