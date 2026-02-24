@@ -7,6 +7,7 @@ import uuid
 import threading
 from werkzeug.utils import secure_filename
 from flask_session import Session
+from flask_cors import CORS
 
 app = Flask(__name__)
 app.secret_key = 'supersecretkey'  # Needed for flash messages
@@ -15,6 +16,8 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+CORS(app, supports_credentials=True)
 
 @app.route('/config')
 def config_page():

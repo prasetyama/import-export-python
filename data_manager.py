@@ -1021,18 +1021,25 @@ def process_import_async(file_paths, table_name, batch_id, temp_dirs=None):
                     file_errors = messages.get('errors', []) if isinstance(messages, dict) else []
                     notes = f"Berhasil memproses {(file_success + len(file_errors))} data"
                     message = f"File uploaded successfully"
+
+                    # Extract date range summary from DOTANGGAL column if present
+                    try:
+                        df_summary = pd.read_csv(filepath, sep=None, engine='python')
+                        df_summary.columns = [str(col).strip().lower() for col in df_summary.columns]
+                        if 'dotanggal' in df_summary.columns:
+                            dates = pd.to_datetime(df_summary['dotanggal'], errors='coerce').dropna()
+                            if not dates.empty:
+                                min_date = dates.min().strftime('%d/%m/%Y')
+                                max_date = dates.max().strftime('%d/%m/%Y')
+                                notes += f"; Periode DO: {min_date} s/d {max_date}"
+                        if 'amount_jual' in df_summary.columns:
+                            total_jual = pd.to_numeric(df_summary['amount_jual'], errors='coerce').sum()
+                            notes += f"; Total Penjualan: Rp {total_jual:,.0f}"
+                    except Exception as e_date:
+                        print(f"Warning: Could not extract date range from DOTANGGAL: {e_date}")
                     drive_link = None
 
-                    upload_to_gdrive_result = upload_to_gdrive([filepath])
-                    if isinstance(upload_to_gdrive_result, list):
-                        for res in upload_to_gdrive_result:
-                            if 'error' in res:
-                                notes += f"; GDrive upload failed: {res['error']}"
-                            else:
-                                notes += f"; Uploaded to GDrive with file ID: {res['gdrive_file_id']}"
-                                drive_link = f"https://drive.google.com/file/d/{res['gdrive_file_id']}/view?usp=drive_link"
-                    else:
-                        notes += f"; GDrive upload skipped: {upload_to_gdrive_result}"
+                    upload_to_gdrive([filepath])
                     
                     if not file_errors: 
                         file_status = '9'
