@@ -319,7 +319,7 @@ def api_import_file():
         mode = 'both'  # special marker for both
 
     if not files or all(f.filename == '' for f in files):
-        return jsonify({"success": False, "error": "No files provided.", "mode": mode}), 400
+        return jsonify({"success": False, "error": "No files provided.", "mode": mode}), 200
 
     user_id = session.get("user_id")
 
@@ -367,7 +367,7 @@ def api_import_file():
                     pass
 
         if not all_file_paths:
-            return jsonify({"success": False, "error": "No valid data files to process.", "warnings": warnings, "mode": mode}), 400
+            return jsonify({"success": False, "error": "No valid data files to process.", "warnings": warnings, "mode": mode}), 200
 
         # Step 2: Quick validate each file (Phase 1)
         validation_results = []
@@ -416,7 +416,7 @@ def api_import_file():
                     "files": validation_results,
                     "warnings": warnings,
                     "mode": mode
-                }), 400
+                }), 200
             for fp in all_file_paths:
                 try:
                     os.remove(fp)
@@ -477,7 +477,7 @@ def api_import_file():
                     "files": validation_results,
                     "warnings": warnings,
                     "mode": mode
-                }), 400
+                }), 200
             thread = threading.Thread(
                 target=data_manager.process_import_async,
                 args=(valid_files, table_name, batch_id, temp_dirs),
@@ -543,7 +543,7 @@ def api_import_file():
                     "files": validation_results,
                     "warnings": warnings,
                     "mode": mode
-                }), 400
+                }), 200
 
             # Start async import thread
             data_manager.update_job_status(batch_id, total_rows=total_rows)
