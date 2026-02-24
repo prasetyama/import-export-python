@@ -11,9 +11,11 @@ import json
 import threading
 
 from gdrive_utils import upload_file_to_gdrive
+from dotenv import load_dotenv
+load_dotenv()
 
-SERVICE_ACCOUNT_FILE = "distributor-file-2336672a2e5c.json"
-GDRIVE_FOLDER_ID = "0AD5Lctdrw7O_Uk9PVA"
+SERVICE_ACCOUNT_FILE = os.getenv("GDRIVE_CREDENTIALS")
+GDRIVE_FOLDER_ID = os.getenv("GDRIVE_FOLDER_ID")
 
 def get_connection():
     """Establishes a connection to the database."""

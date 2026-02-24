@@ -16,9 +16,6 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-SERVICE_ACCOUNT_FILE = "distributor-file-2336672a2e5c.json"
-GDRIVE_FOLDER_ID = "1YI2-Jm3KiIBwGO2U1nLxZ_QtUwm8AQPv"
-
 @app.route('/config')
 def config_page():
     # Default to stocks if not provided
