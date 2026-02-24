@@ -540,7 +540,7 @@ def import_multiple_files(file_paths, table_name='auto'):
 # "Processing Failed": 8,
 # "Processing Complete": 9,
 
-def create_import_job(batch_id, filename, dist_id=None, file_size=None):
+def create_import_job(batch_id, filename, dist_id=None, file_size=None, user_id=None):
     """Creates a new import job record in the database."""
     print(f"Creating job for batch_id: {batch_id}, filename: {filename}")
     connection = get_connection()
@@ -548,8 +548,8 @@ def create_import_job(batch_id, filename, dist_id=None, file_size=None):
     try:
         cursor = connection.cursor()
         cursor.execute(
-            "INSERT INTO upload_logs (file_type, file_name, file_size, status, file_name_zip, distid, created_at) VALUES (%s, %s, %s, '3', %s, %s, NOW())",
-            (filename, filename, file_size, batch_id, dist_id)
+            "INSERT INTO upload_logs (file_type, file_name, file_size, status, file_name_zip, distid, user_id, created_at) VALUES (%s, %s, %s, '3', %s, %s, %s, NOW())",
+            (filename, filename, file_size, batch_id, dist_id, user_id)
         )
         connection.commit()
         return batch_id
@@ -935,62 +935,6 @@ def quick_validate_file(filepath, table_name, dist_id=None):
 
     except Exception as e:
         return False, f"Error reading file: {str(e)}", 0
-
-
-def _check_missing_table_files(all_file_paths, batch_id, dist_id):
-    """
-    Checks which import_tables have no matching uploaded file in all_file_paths.
-    For each missing table, creates a job entry via create_import_job with status '0'.
-    Returns a list of missing table dicts.
-    """
-    connection = get_connection()
-    if not connection:
-        return []
-
-    try:
-        cursor = connection.cursor(dictionary=True)
-        cursor.execute("SELECT table_name, display_name, allowed_filename FROM import_tables WHERE allowed_filename != '' AND allowed_filename IS NOT NULL")
-        tables = cursor.fetchall()
-
-        if not tables:
-            return []
-
-        # Get uploaded filenames (without extension, lowercased)
-        uploaded_names = []
-        for fp in all_file_paths:
-            base_name = os.path.basename(fp)
-            name_only_lower = os.path.splitext(base_name)[0].lower()
-            uploaded_names.append(name_only_lower)
-
-        missing_tables = []
-        for table in tables:
-            allowed_list = [a.strip().lower() for a in table['allowed_filename'].split(',') if a.strip()]
-            # Check if any uploaded file matches this table's allowed filenames
-            has_match = any(name in allowed_list for name in uploaded_names)
-            if not has_match:
-                missing_filename = table['allowed_filename']
-                # Create job entry for the missing file
-                create_import_job(batch_id, table['display_name'], dist_id, 0)
-                update_job_status(
-                    batch_id,
-                    filename=table['display_name'],
-                    status='0',
-                    message="User skipped this step"
-                )
-                missing_tables.append({
-                    'table_name': table['table_name'],
-                    'display_name': table['display_name'],
-                    'allowed_filename': missing_filename
-                })
-
-        return missing_tables
-    except Error as e:
-        print(f"Error checking missing table files: {e}")
-        return []
-    finally:
-        if connection and connection.is_connected():
-            cursor.close()
-            connection.close()
 
 
 def process_import_async(file_paths, table_name, batch_id, temp_dirs=None):

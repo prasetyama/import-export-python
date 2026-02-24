@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, send_file, flash, jsonify
+from flask import Flask, render_template, request, redirect, url_for, send_file, flash, jsonify, session
 import data_manager
 import config
 import pandas as pd
@@ -6,7 +6,7 @@ import os
 import uuid
 import threading
 from werkzeug.utils import secure_filename
-from gdrive_utils import upload_file_to_gdrive
+from flask_session import Session
 
 app = Flask(__name__)
 app.secret_key = 'supersecretkey'  # Needed for flash messages
@@ -321,6 +321,8 @@ def api_import_file():
     if not files or all(f.filename == '' for f in files):
         return jsonify({"success": False, "error": "No files provided.", "mode": mode}), 400
 
+    user_id = session.get("user_id")
+
     table_name = request.form.get('table_name', 'auto')
     dist_id = request.form.get('dist_id', None)
     all_file_paths = []
@@ -439,7 +441,7 @@ def api_import_file():
             for fp in all_file_paths:
                 file_size = os.path.getsize(fp)
                 fname = os.path.basename(fp)
-                data_manager.create_import_job(batch_id, fname, dist_id, file_size=file_size)
+                data_manager.create_import_job(batch_id, fname, dist_id, file_size=file_size, user_id=user_id)
 
             for fp in all_file_paths:
                 fname = os.path.basename(fp)
@@ -503,7 +505,7 @@ def api_import_file():
             for fp in all_file_paths:
                 file_size = os.path.getsize(fp)
                 fname = os.path.basename(fp)
-                data_manager.create_import_job(batch_id, fname, dist_id, file_size=file_size)
+                data_manager.create_import_job(batch_id, fname, dist_id, file_size=file_size, user_id=user_id)
 
             # Quick validate each file
             for fp in all_file_paths:
