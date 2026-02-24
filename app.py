@@ -6,6 +6,7 @@ import os
 import uuid
 import threading
 from werkzeug.utils import secure_filename
+from gdrive_utils import upload_file_to_gdrive
 
 app = Flask(__name__)
 app.secret_key = 'supersecretkey'  # Needed for flash messages
@@ -14,6 +15,9 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+SERVICE_ACCOUNT_FILE = "distributor-file-2336672a2e5c.json"
+GDRIVE_FOLDER_ID = "1YI2-Jm3KiIBwGO2U1nLxZ_QtUwm8AQPv"
 
 @app.route('/config')
 def config_page():

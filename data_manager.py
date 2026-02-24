@@ -10,6 +10,11 @@ import uuid
 import json
 import threading
 
+from gdrive_utils import upload_file_to_gdrive
+
+SERVICE_ACCOUNT_FILE = "distributor-file-2336672a2e5c.json"
+GDRIVE_FOLDER_ID = "0AD5Lctdrw7O_Uk9PVA"
+
 def get_connection():
     """Establishes a connection to the database."""
     try:
@@ -556,7 +561,7 @@ def create_import_job(batch_id, filename, dist_id=None, file_size=None):
 
 
 def update_job_status(batch_id, filename=None, status=None, total_rows=None, processed_rows=None,
-                      success_count=None, error_count=None, error_details=None, message=None, notes=None):
+                      success_count=None, error_count=None, error_details=None, message=None, notes=None, link_file=None):
     """Updates the status of an import job (or specific file in a batch)."""
     connection = get_connection()
     if not connection: return False
@@ -595,6 +600,10 @@ def update_job_status(batch_id, filename=None, status=None, total_rows=None, pro
             
         if status in ('2','3', '5', '9'):
             updates.append("update_process = NOW()")
+
+        if link_file:
+            updates.append("link_file = %s")
+            params.append(link_file)
 
         if not updates:
             return True
@@ -1012,6 +1021,18 @@ def process_import_async(file_paths, table_name, batch_id, temp_dirs=None):
                     file_errors = messages.get('errors', []) if isinstance(messages, dict) else []
                     notes = f"Berhasil memproses {(file_success + len(file_errors))} data"
                     message = f"File uploaded successfully"
+                    drive_link = None
+
+                    upload_to_gdrive_result = upload_to_gdrive([filepath])
+                    if isinstance(upload_to_gdrive_result, list):
+                        for res in upload_to_gdrive_result:
+                            if 'error' in res:
+                                notes += f"; GDrive upload failed: {res['error']}"
+                            else:
+                                notes += f"; Uploaded to GDrive with file ID: {res['gdrive_file_id']}"
+                                drive_link = f"https://drive.google.com/file/d/{res['gdrive_file_id']}/view?usp=drive_link"
+                    else:
+                        notes += f"; GDrive upload skipped: {upload_to_gdrive_result}"
                     
                     if not file_errors: 
                         file_status = '9'
@@ -1034,7 +1055,8 @@ def process_import_async(file_paths, table_name, batch_id, temp_dirs=None):
                     processed_rows=(file_success + len(file_errors)),
                     total_rows=(file_success + len(file_errors)),
                     message=message,
-                    notes=notes
+                    notes=notes,
+                    link_file=drive_link
                 )
 
             except Exception as e:
@@ -1063,3 +1085,17 @@ def process_import_async(file_paths, table_name, batch_id, temp_dirs=None):
                     shutil.rmtree(td, ignore_errors=True)
                 except:
                     pass
+
+def upload_to_gdrive(filepath):
+    """Uploads a file to Google Drive and returns the file ID."""
+    gdrive_results = []
+    if GDRIVE_FOLDER_ID and SERVICE_ACCOUNT_FILE:
+        for fp in filepath:
+            try:
+                file_id = upload_file_to_gdrive(fp, GDRIVE_FOLDER_ID, SERVICE_ACCOUNT_FILE)
+                gdrive_results.append({'filename': os.path.basename(fp), 'gdrive_file_id': file_id})
+            except Exception as e:
+                gdrive_results.append({'filename': os.path.basename(fp), 'error': str(e)})
+    else:
+        gdrive_results = 'GDrive config missing'
+    return gdrive_results
