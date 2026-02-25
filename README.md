@@ -94,27 +94,27 @@ GDRIVE_FOLDER_ID=your_gdrive_folder_id
 
 ```mermaid
 flowchart TD
-    A["POST /api/import\n(files, mode, table_name, dist_id)"] --> B{"Ada files\nyang dikirim?"}
-    B -- Tidak --> B1["❌ Return:\nNo files provided"]
-    B -- Ya --> C["Tentukan Mode\n(quick / full / both)"]
+    A["POST /api/import (files, mode, table_name, dist_id)"] --> B{"Ada files yang dikirim?"}
+    B -- Tidak --> B1["❌ Return: No files provided"]
+    B -- Ya --> C["Tentukan Mode (quick / full / both)"]
 
-    C --> D["📂 Step 1:\nSave & Extract Files"]
+    C --> D["📂 Step 1: Save & Extract Files"]
     D --> D1{"Untuk setiap file"}
     D1 --> D2{"Ekstensi file?"}
     D2 -- ".zip" --> D3["Extract ZIP"]
     D3 --> D4{"ZIP valid?"}
-    D4 -- Ya --> D5["Tambah extracted files\nke all_file_paths"]
-    D4 -- Tidak --> D6["⚠️ Warning:\nInvalid ZIP"]
-    D2 -- ".csv / .txt" --> D7["Tambah ke\nall_file_paths"]
-    D2 -- Lainnya --> D8["⚠️ Warning:\nUnsupported, skip"]
+    D4 -- Ya --> D5["Tambah extracted files ke all_file_paths"]
+    D4 -- Tidak --> D6["⚠️ Warning: Invalid ZIP"]
+    D2 -- ".csv / .txt" --> D7["Tambah ke all_file_paths"]
+    D2 -- Lainnya --> D8["⚠️ Warning: Unsupported, skip"]
 
-    D5 --> D9{"Masih ada\nfile lain?"}
+    D5 --> D9{"Masih ada file lain?"}
     D6 --> D9
     D7 --> D9
     D8 --> D9
     D9 -- Ya --> D1
-    D9 -- Tidak --> E{"all_file_paths\nkosong?"}
-    E -- Ya --> E1["❌ Return:\nNo valid data files"]
+    D9 -- Tidak --> E{"all_file_paths kosong?"}
+    E -- Ya --> E1["❌ Return: No valid data files"]
     E -- Tidak --> F["Generate batch_id"]
 
     F --> G{"Mode?"}
@@ -123,26 +123,26 @@ flowchart TD
     G -- full --> FL["📦 Mode Full"]
     G -- both --> BT["🔄 Mode Both"]
 
-    Q --> QV["Quick Validate\nsetiap file"]
+    Q --> QV["Quick Validate setiap file"]
     QV --> QR{"Semua gagal?"}
     QR -- Ya --> QF["❌ All files failed"]
-    QR -- Tidak --> QS["✅ Return:\nValidation completed"]
+    QR -- Tidak --> QS["✅ Return: Validation completed"]
 
-    FL --> FJ["Create import_job\nper file"]
-    FJ --> FV["Quick Validate\nsetiap file"]
+    FL --> FJ["Create import_job per file"]
+    FJ --> FV["Quick Validate setiap file"]
     FV --> FR{"Semua gagal?"}
     FR -- Ya --> FF["❌ All files failed"]
     FR -- Tidak --> FT["🚀 Start Async Thread"]
-    FT --> FM["Check Missing\nTable Files"]
-    FM --> FS["✅ Return 202:\nImport started"]
+    FT --> FM["Check Missing Table Files"]
+    FM --> FS["✅ Return 202: Import started"]
 
-    BT --> BJ["Create import_job\nper file"]
-    BJ --> BV["Quick Validate\nsetiap file"]
+    BT --> BJ["Create import_job per file"]
+    BJ --> BV["Quick Validate setiap file"]
     BV --> BR{"Semua gagal?"}
     BR -- Ya --> BF["❌ All files failed"]
     BR -- Tidak --> BTT["🚀 Start Async Thread"]
-    BTT --> BTM["Check Missing\nTable Files"]
-    BTM --> BS["✅ Return:\nValidation + Import started"]
+    BTT --> BTM["Check Missing Table Files"]
+    BTM --> BS["✅ Return: Validation + Import started"]
 
     style A fill:#4A90D9,color:#fff
     style B1 fill:#E74C3C,color:#fff
@@ -163,42 +163,42 @@ Fungsi `quick_validate_file()` melakukan **7 tahap validasi** secara bertahap:
 
 ```mermaid
 flowchart TD
-    V1["quick_validate_file\n(filepath, table_name, dist_id)"] --> V2["1️⃣ Cek file exists\n& extension (.csv/.txt)"]
+    V1["quick_validate_file (filepath, table_name, dist_id)"] --> V2["1️⃣ Cek file exists & extension (.csv/.txt)"]
     V2 --> V2R{"Valid?"}
-    V2R -- Tidak --> V2F["❌ File not found /\nUnsupported extension"]
-    V2R -- Ya --> V3["2️⃣ Baca file CSV\n(pd.read_csv)"]
+    V2R -- Tidak --> V2F["❌ File not found / Unsupported extension"]
+    V2R -- Ya --> V3["2️⃣ Baca file CSV (pd.read_csv)"]
     V3 --> V3R{"File kosong?"}
     V3R -- Ya --> V3F["❌ File is empty"]
-    V3R -- Tidak --> V4["3️⃣ Normalize headers\n(lowercase, strip)"]
+    V3R -- Tidak --> V4["3️⃣ Normalize headers (lowercase, strip)"]
 
-    V4 --> V5{"table_name\n= auto?"}
-    V5 -- Ya --> V6["4️⃣ Auto-detect:\ncocokkan filename\ndengan allowed_filename"]
+    V4 --> V5{"table_name = auto?"}
+    V5 -- Ya --> V6["4️⃣ Auto-detect: cocokkan filename dengan allowed_filename"]
     V6 --> V6R{"Dikenali?"}
-    V6R -- Tidak --> V6F["❌ Filename\nnot recognized"]
+    V6R -- Tidak --> V6F["❌ Filename not recognized"]
     V6R -- Ya --> V7["Set table_name"]
     V5 -- Tidak --> V7
 
     V7 --> V8["5️⃣ Load column configs"]
     V8 --> V8R{"Config ada?"}
-    V8R -- Tidak --> V8F["❌ No column\nconfig found"]
+    V8R -- Tidak --> V8F["❌ No column config found"]
     V8R -- Ya --> V9["6️⃣ Cek Mandatory Columns"]
 
-    V9 --> V9D["Cek setiap mandatory column\nada di headers (+ alias)"]
-    V9D --> V9R{"Ada yang\nhilang?"}
-    V9R -- Ya --> V9F["❌ Missing\nmandatory columns"]
-    V9R -- Tidak --> V10{"dist_id\ndiberikan?"}
+    V9 --> V9D["Cek setiap mandatory column ada di headers (+ alias)"]
+    V9D --> V9R{"Ada yang hilang?"}
+    V9R -- Ya --> V9F["❌ Missing mandatory columns"]
+    V9R -- Tidak --> V10{"dist_id diberikan?"}
 
     V10 -- Ya --> V11["7️⃣a Cek DistID Prefix"]
-    V11 --> V11D["5 baris pertama:\nbandingkan 2 digit awal"]
+    V11 --> V11D["5 baris pertama: bandingkan 2 digit awal"]
     V11D --> V11R{"Prefix cocok?"}
-    V11R -- Tidak --> V11F["❌ DistID\nprefix mismatch"]
+    V11R -- Tidak --> V11F["❌ DistID prefix mismatch"]
     V11R -- Ya --> V12["7️⃣b Validate Sample Rows"]
     V10 -- Tidak --> V12
 
-    V12 --> V12D["Cek 2 baris pertama:\n• mandatory not empty\n• int parseable\n• date format valid"]
+    V12 --> V12D["Cek 2 baris pertama: • mandatory not empty • int parseable • date format valid"]
     V12D --> V12R{"Ada error?"}
-    V12R -- Ya --> V12F["❌ Validation errors\nin sample rows"]
-    V12R -- Tidak --> V13["✅ VALID\n(True, None, total_rows)"]
+    V12R -- Ya --> V12F["❌ Validation errors in sample rows"]
+    V12R -- Tidak --> V13["✅ VALID (True, None, total_rows)"]
 
     style V1 fill:#4A90D9,color:#fff
     style V2F fill:#E74C3C,color:#fff
@@ -219,26 +219,26 @@ Fungsi `process_import_async()` berjalan di background thread setelah validasi b
 
 ```mermaid
 flowchart TD
-    P1["process_import_async\n(file_paths, table_name, batch_id)"] --> P2{"Untuk setiap file"}
-    P2 --> P3["Update status = 3\n(Waiting Process)"]
-    P3 --> P4{"table_name\nspesifik?"}
-    P4 -- Ya --> P5["import_file_process\n(filename, table_name)"]
-    P4 -- auto --> P6["import_dynamic_data\n(filename)"]
+    P1["process_import_async (file_paths, table_name, batch_id)"] --> P2{"Untuk setiap file"}
+    P2 --> P3["Update status = 3 (Waiting Process)"]
+    P3 --> P4{"table_name spesifik?"}
+    P4 -- Ya --> P5["import_file_process (filename, table_name)"]
+    P4 -- auto --> P6["import_dynamic_data (filename)"]
 
-    P5 --> P7{"Import\nberhasil?"}
+    P5 --> P7{"Import berhasil?"}
     P6 --> P7
 
-    P7 -- Ya --> P8["Hitung success_count\n& errors"]
-    P8 --> P8A["Extract summary\n(DOTANGGAL, amount_jual,\nexportdate)"]
-    P8A --> P8B["Upload ke\nGoogle Drive"]
-    P8B --> P9["Update status = 9\n(Processing Complete)"]
+    P7 -- Ya --> P8["Hitung success_count & errors"]
+    P8 --> P8A["Extract summary (DOTANGGAL, amount_jual, exportdate)"]
+    P8A --> P8B["Upload ke Google Drive"]
+    P8B --> P9["Update status = 9 (Processing Complete)"]
 
-    P7 -- Tidak --> P10["Update status = 2\n(Failed) + error details"]
+    P7 -- Tidak --> P10["Update status = 2 (Failed) + error details"]
 
-    P9 --> P11{"Masih ada\nfile lain?"}
+    P9 --> P11{"Masih ada file lain?"}
     P10 --> P11
     P11 -- Ya --> P2
-    P11 -- Tidak --> P12["🧹 Cleanup\nfiles & temp dirs"]
+    P11 -- Tidak --> P12["🧹 Cleanup files & temp dirs"]
 
     style P1 fill:#4A90D9,color:#fff
     style P9 fill:#27AE60,color:#fff
