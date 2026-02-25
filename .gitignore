@@ -27,3 +27,6 @@ Thumbs.db
 uploads/
 *.sqlite3
 *.db
+
+distributor-file-211f51391c40.json
+.env

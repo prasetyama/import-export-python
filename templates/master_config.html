@@ -119,7 +119,8 @@
     <div style="margin-bottom: 20px;">
         <a href="/" class="nav-link">Home</a>
         <a href="/config" class="nav-link">Column Config</a>
-        <a href="/master-config" class="nav-link" style="font-weight: bold;">Master Config</a>
+        <a href="/master-config" class="nav-link">Master Config</a>
+        <a href="/batch" class="nav-link">Batch</a>
     </div>
 
     <h1>Master Configuration</h1>
@@ -146,10 +147,10 @@
                 <small>Use only letters, numbers, and underscores.</small>
             </div>
             <div class="form-group">
-                <label for="allowed_filename">Allowed Filename (for auto-detect import)</label>
-                <input type="text" id="allowed_filename" name="allowed_filename" placeholder="e.g. pv_inventory.csv">
-                <small>The uploaded filename must contain this value to auto-detect. Leave empty to disable auto-detect
-                    for this table.</small>
+                <label for="allowed_filename">Allowed Filenames (comma-separated for auto-detect)</label>
+                <input type="text" id="allowed_filename" name="allowed_filename" placeholder="e.g. stock_a, stock_b">
+                <small>The uploaded filename (without extension) must match one of these values to auto-detect.
+                    Separate multiple names with commas. Leave empty to disable auto-detect.</small>
             </div>
 
             <h3>Initial Columns</h3>
@@ -160,7 +161,12 @@
                         <option value="str">String (Text)</option>
                         <option value="int">Integer (Number)</option>
                         <option value="date">Date</option>
+                        <option value="datetime">Datetime</option>
                     </select>
+                    <label style="display: flex; align-items: center; gap: 5px; font-weight: normal;">
+                        <input type="checkbox" onchange="updateUniqueInput(this)"> Unique
+                        <input type="hidden" name="col_unique[]" value="false">
+                    </label>
                 </div>
             </div>
             <button type="button" onclick="addColumnRow()" style="background-color: #28a745; margin-bottom: 10px;">+ Add
@@ -193,7 +199,7 @@
                             style="display: flex; gap: 5px; align-items: center;">
                             <input type="hidden" name="table_id" value="{{ table.id }}">
                             <input type="text" name="allowed_filename" value="{{ table.allowed_filename or '' }}"
-                                placeholder="e.g. pv_inventory.csv"
+                                placeholder="e.g. stock_a, stock_b"
                                 style="padding: 5px; border: 1px solid #ccc; border-radius: 3px; flex: 1;">
                             <button type="submit" style="padding: 5px 10px; font-size: 0.85em;">Save</button>
                             <a href="/config?table={{ table.table_name }}" style="margin-left: 5px;">Manage Columns</a>
@@ -226,7 +232,13 @@
                     <option value="str">String</option>
                     <option value="int">Integer</option>
                     <option value="date">Date</option>
+                    <option value="datetime">Datetime</option>
                 </select>
+            </div>
+            <div class="form-group">
+                <label style="display: flex; align-items: center; gap: 5px;">
+                    <input type="checkbox" name="is_unique"> Unique
+                </label>
             </div>
             <button type="submit">Add Column</button>
         </form>
@@ -243,10 +255,21 @@
                     <option value="str">String</option>
                     <option value="int">Integer</option>
                     <option value="date">Date</option>
+                    <option value="datetime">Datetime</option>
                 </select>
+                <label style="display: flex; align-items: center; gap: 5px; font-weight: normal;">
+                    <input type="checkbox" onchange="updateUniqueInput(this)"> Unique
+                    <input type="hidden" name="col_unique[]" value="false">
+                </label>
                 <button type="button" class="remove-col" onclick="this.parentElement.remove()">X</button>
             `;
             container.appendChild(newRow);
+        }
+
+        function updateUniqueInput(checkbox) {
+            // Find the sibling hidden input and update its value
+            const hiddenInput = checkbox.parentElement.querySelector('input[type="hidden"]');
+            hiddenInput.value = checkbox.checked ? 'true' : 'false';
         }
     </script>
 </body>

@@ -98,14 +98,30 @@
             border-color: #bee5eb;
             color: #0c5460;
         }
+
+        .nav-link {
+            display: inline-block;
+            margin-right: 15px;
+            text-decoration: none;
+            color: #007bff;
+        }
+
+        .nav-link:hover {
+            text-decoration: underline;
+        }
     </style>
 </head>
 
 <body>
+    <div style="margin-bottom: 20px;">
+        <a href="/" class="nav-link">Home</a>
+        <a href="/config" class="nav-link">Column Config</a>
+        <a href="/master-config" class="nav-link">Master Config</a>
+        <a href="/batch" class="nav-link">Batch</a>
+    </div>
     <div class="container">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
             <h1>Import/Export Dashboard</h1>
-            <a href="{{ url_for('master_config') }}" class="btn">Master Config</a>
         </div>
 
         {% with messages = get_flashed_messages() %}

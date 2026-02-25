@@ -1,10 +1,10 @@
 import os
 
 # Database Configuration
-DB_HOST = os.getenv('DB_HOST', 'localhost')
-DB_USER = os.getenv('DB_USER', 'root')
-DB_PASSWORD = os.getenv('DB_PASSWORD', 'root123456%qaz!') # SENSITIVE: Change this or use env var
-DB_NAME = os.getenv('DB_NAME', 'inventory_db')
+DB_HOST = os.getenv('DB_HOST')
+DB_USER = os.getenv('DB_USER')
+DB_PASSWORD = os.getenv('DB_PASSWORD')
+DB_NAME = os.getenv('DB_NAME')
 
 # Table Name
-TABLE_NAME = 'stocks'
+TABLE_NAME = 'inventory'

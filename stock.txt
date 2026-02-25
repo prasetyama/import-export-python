@@ -1,4 +1,0 @@
-random_col, SKU ,  Stock Pcs,  Junk, Kode Gudang
-ignore,   ITEM-012,  160,       xxx,  WH-B
-ignore,   ITEM-013,  250,       yyy,  WH-F
-ignore,   ,          300,       zzz,  WH-X

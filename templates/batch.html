@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h3>Batch Job Management</h3>
+
+{% if jobs %}
+<table>
+    <thead>
+        <tr>
+            <th>Batch ID</th>
+            <th>Filename</th>
+            <th>Total Rows</th>
+            <th>Processed Rows</th>
+            <th>Success Count</th>
+            <th>Error Count</th>
+            <th>Status</th>
+            <th>Created At</th>
+            <th>Completed At</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for job in jobs %}
+        <tr>
+            <td><a href="/batch/{{ job.batch_id }}">{{ job.batch_id }}</a></td>
+            <td>{{ job.filename }}</td>
+            <td>{{ job.total_rows }}</td>
+            <td>{{ job.processed_rows }}</td>
+            <td>{{ job.success_count }}</td>
+            <td>{{ job.error_count }}</td>
+            <td>{{ job.status }}</td>
+            <td>{{ job.created_at }}</td>
+            <td>{{ job.completed_at }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No batch jobs found.</p>
+{% endif %}
+
+{% endblock %}

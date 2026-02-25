@@ -1,9 +1,13 @@
-from flask import Flask, render_template, request, redirect, url_for, send_file, flash, jsonify
+from flask import Flask, render_template, request, redirect, url_for, send_file, flash, jsonify, session
 import data_manager
 import config
 import pandas as pd
 import os
+import uuid
+import threading
 from werkzeug.utils import secure_filename
+from flask_session import Session
+from flask_cors import CORS
 
 app = Flask(__name__)
 app.secret_key = 'supersecretkey'  # Needed for flash messages
@@ -12,6 +16,8 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+CORS(app, supports_credentials=True)
 
 @app.route('/config')
 def config_page():
@@ -25,10 +31,11 @@ def config_page():
 def update_config():
     column_id = request.form.get('id')
     is_mandatory = request.form.get('is_mandatory') == 'on'
+    is_unique = request.form.get('is_unique') == 'on'
     data_type = request.form.get('data_type')
     table_name = request.form.get('table_name', 'stocks') # Need to pass this back for redirect
     
-    if data_manager.update_column_config(column_id, is_mandatory, data_type):
+    if data_manager.update_column_config(column_id, is_mandatory, is_unique, data_type):
         flash("Configuration updated successfully.", "success")
     else:
         flash("Failed to update configuration.", "error")
@@ -72,10 +79,21 @@ def add_table():
     col_names = request.form.getlist('col_name[]')
     col_types = request.form.getlist('col_type[]')
     
+    # Handling checkboxes for dynamic rows is tricky. 
+    # We will assume frontend sends a hidden input for each row or we process differently.
+    # Actually, simplistic approach: check if 'col_unique_{index}' exists for each name index.
+    # But names are just a list. 
+    # Better approach: The frontend should send col_unique[] as a list of "true"/"false" strings, managed by JS.
+    col_uniques = request.form.getlist('col_unique[]')
+    
     initial_columns = []
-    for name, dtype in zip(col_names, col_types):
+    for i, (name, dtype) in enumerate(zip(col_names, col_types)):
         if name and name.strip():
-            initial_columns.append({'name': name.strip(), 'type': dtype})
+            is_unique = False
+            if i < len(col_uniques):
+               is_unique = (col_uniques[i] == 'true')
+            
+            initial_columns.append({'name': name.strip(), 'type': dtype, 'is_unique': is_unique})
             
     if data_manager.create_new_import_table(table_name, display_name, initial_columns, allowed_filename):
         flash(f"Table '{display_name}' created successfully.", "success")
@@ -100,8 +118,9 @@ def add_column():
     table_name = request.form.get('table_name')
     column_name = request.form.get('column_name')
     data_type = request.form.get('data_type')
+    is_unique = request.form.get('is_unique') == 'on'
     
-    if data_manager.add_column_to_table(table_name, column_name, data_type):
+    if data_manager.add_column_to_table(table_name, column_name, data_type, is_unique=is_unique):
         flash(f"Column '{column_name}' added to {table_name}.", "success")
     else:
         flash("Failed to add column.", "error")
@@ -114,7 +133,7 @@ def index():
     data = []
     if conn:
         try:
-            query = f"SELECT * FROM {config.TABLE_NAME}"
+            query = f"SELECT * FROM {config.TABLE_NAME} order by id desc limit 100"
             df = pd.read_sql(query, conn)
             data = df.to_dict(orient='records')
         except Exception as e:
@@ -135,10 +154,13 @@ def import_file():
         return redirect(url_for('index'))
 
     table_name = request.form.get('table_name', 'auto')
+    dist_id = request.form.get('dist_id', None) 
     all_file_paths = []
-    temp_dirs = []  # track temp dirs for cleanup
+    temp_dirs = []
+    warnings = []
 
     try:
+        # ========== Step 1: Simpan file & extract ZIP (sama seperti API) ==========
         for file in files:
             if file.filename == '':
                 continue
@@ -150,7 +172,6 @@ def import_file():
             _, ext = os.path.splitext(filename)
 
             if ext.lower() == '.zip':
-                # Extract ZIP to temp directory
                 temp_dir = os.path.join(app.config['UPLOAD_FOLDER'], f'_zip_{os.path.splitext(filename)[0]}')
                 os.makedirs(temp_dir, exist_ok=True)
                 temp_dirs.append(temp_dir)
@@ -159,9 +180,10 @@ def import_file():
                 if extracted:
                     all_file_paths.extend(extracted)
                 else:
-                    flash(f"⚠️ {filename}: Invalid ZIP file or no data files (.csv/.txt) found inside.")
+                    msg = f"{filename}: Invalid ZIP or no data files found inside."
+                    warnings.append(msg)
+                    flash(f"⚠️ {msg}")
 
-                # Remove the zip file itself
                 try:
                     os.remove(filepath)
                 except:
@@ -169,7 +191,9 @@ def import_file():
             elif ext.lower() in ['.csv', '.txt']:
                 all_file_paths.append(filepath)
             else:
-                flash(f"⚠️ {filename}: Unsupported file type '{ext}'. Skipped.")
+                msg = f"{filename}: Unsupported file type '{ext}'. Skipped."
+                warnings.append(msg)
+                flash(f"⚠️ {msg}")
                 try:
                     os.remove(filepath)
                 except:
@@ -179,27 +203,77 @@ def import_file():
             flash('No valid data files to process.')
             return redirect(url_for('index'))
 
-        # Process all collected files
-        results = data_manager.import_multiple_files(all_file_paths, table_name)
+        # ========== Step 2: Quick validate (sama seperti API) ==========
+        validation_results = []
+        valid_files = []
+        total_rows = 0
 
-        # Flash results per file
-        success_total = 0
-        fail_total = 0
-        for r in results:
-            if r['success']:
-                success_total += 1
-                flash(f"✅ {r['filename']}: {r['message']}")
-                if r.get('errors'):
-                    for err in r['errors']:
-                        flash(f"⚠️ {r['filename']}: {err}")
+        # Generate single batch_id for entire upload
+        batch_id = str(uuid.uuid4())
+        
+        # Create a job row for EACH file
+        for fp in all_file_paths:
+            fname = os.path.basename(fp)
+            data_manager.create_import_job(batch_id, fname, table_name, dist_id)
+
+        for fp in all_file_paths:
+            fname = os.path.basename(fp)
+            is_valid, error_msg, row_count = data_manager.quick_validate_file(fp, table_name, dist_id)
+            if is_valid:
+                valid_files.append(fp)
+                total_rows += row_count
+                validation_results.append({"filename": fname, "valid": True, "rows": row_count})
             else:
-                fail_total += 1
-                flash(f"❌ {r['filename']}: {r['message']}")
+                validation_results.append({"filename": fname, "valid": False, "error": error_msg})
+                # Update the existing job row for this file as failed
+                data_manager.update_job_status(batch_id, filename=fname, status='2', 
+                    error_count=1, error_details=[f"Quick validation failed: {error_msg}"])
+        if not valid_files:
+            # Cleanup only, no need for global batch update as individual rows are already marked failed.
+            for fp in all_file_paths:
+                try:
+                    os.remove(fp)
+                except:
+                    pass
+            for td in temp_dirs:
+                try:
+                    import shutil
+                    shutil.rmtree(td, ignore_errors=True)
+                except:
+                    pass
 
-        flash(f"📊 Import Summary: {success_total} file(s) succeeded, {fail_total} file(s) failed out of {len(results)} total.")
+            flash('All files failed validation.')
+            for v in validation_results:
+                if not v['valid']:
+                    flash(f"❌ {v['filename']}: {v.get('error', 'Validation failed.')}")
+            return redirect(url_for('index'))
 
-    finally:
-        # Cleanup all uploaded/extracted files
+        # Tampilkan hasil validasi per file (warning untuk yang gagal)
+        for v in validation_results:
+            if v['valid']:
+                flash(f"✅ {v['filename']}: {v['rows']} rows, validation passed.")
+            else:
+                flash(f"❌ {v['filename']}: {v.get('error', 'Validation failed.')}")
+
+        # ========== Step 3: Update processed rows tracking if needed & start async processing ==========
+        # (Total rows are updated per-file during async or already set if we want)
+        
+        # ========== Step 4: Jalankan proses async ==========
+        thread = threading.Thread(
+            target=data_manager.process_import_async,
+            args=(valid_files, table_name, batch_id, temp_dirs),
+            daemon=True
+        )
+        thread.start()
+
+        flash(f"📦 Import job created with ID: {batch_id}.")
+        flash(f"📊 Total rows to process: {total_rows} from {len(valid_files)} file(s).")
+        flash("ℹ️ Data is being processed in background. You can check job status via API /api/jobs or /api/jobs/<batch_id>.")
+
+        return redirect(url_for('index'))
+
+    except Exception as e:
+        # Cleanup on unexpected error
         for fp in all_file_paths:
             try:
                 os.remove(fp)
@@ -212,7 +286,8 @@ def import_file():
             except:
                 pass
 
-    return redirect(url_for('index'))
+        flash(f"Server error during import: {str(e)}")
+        return redirect(url_for('index'))
 
 @app.route('/export/<format_type>')
 def export_file(format_type):
@@ -235,17 +310,31 @@ def export_file(format_type):
 
 @app.route('/api/import', methods=['POST'])
 def api_import_file():
-    """API: Upload multiple files (+ ZIP) and import data. Returns JSON results."""
+    """API: Upload files, quick validate, then process async. Returns batch_id."""
     files = request.files.getlist('files')
+    
+    # Determine mode: 'quick', 'full', or both (if missing/invalid)
+    mode = request.form.get('mode')
+    if not mode:
+        j = request.get_json(silent=True) or {}
+        mode = j.get('mode')
+    if mode not in ['quick', 'full']:
+        mode = 'both'  # special marker for both
+
     if not files or all(f.filename == '' for f in files):
-        return jsonify({"success": False, "error": "No files provided."}), 400
+        return jsonify({"success": False, "error": "No files provided.", "mode": mode}), 200
+
+    user_id = session.get("user_id")
 
     table_name = request.form.get('table_name', 'auto')
+    dist_id = request.form.get('dist_id', None)
     all_file_paths = []
     temp_dirs = []
     warnings = []
+    filenames = []
 
     try:
+        # Step 1: Save files and extract ZIPs
         for file in files:
             if file.filename == '':
                 continue
@@ -281,29 +370,211 @@ def api_import_file():
                     pass
 
         if not all_file_paths:
-            return jsonify({"success": False, "error": "No valid data files to process.", "warnings": warnings}), 400
+            return jsonify({"success": False, "error": "No valid data files to process.", "warnings": warnings, "mode": mode}), 200
 
-        results = data_manager.import_multiple_files(all_file_paths, table_name)
+        # Step 2: Quick validate each file (Phase 1)
+        validation_results = []
+        valid_files = []
+        total_rows = 0
 
-        success_count = sum(1 for r in results if r['success'])
-        fail_count = sum(1 for r in results if not r['success'])
+        # Generate single batch_id for entire upload
+        batch_id = str(uuid.uuid4())
 
-        return jsonify({
-            "success": True,
-            "data": {
-                "summary": {
-                    "total_files": len(results),
-                    "succeeded": success_count,
-                    "failed": fail_count
-                },
-                "results": results,
+        # ========== MODE HANDLING ==========
+        if mode == 'quick':
+            # Only quick validation, no async import
+            # data_manager.update_job_status(batch_id, status='5', total_rows=total_rows)
+
+            for fp in all_file_paths:
+                fname = os.path.basename(fp)
+                is_valid, error_msg, row_count = data_manager.quick_validate_file(fp, table_name, dist_id)
+                if is_valid:
+                    valid_files.append(fp)
+                    total_rows += row_count
+                    validation_results.append({"filename": fname, "valid": True, "rows": row_count})
+                else:
+                    validation_results.append({"filename": fname, "valid": False, "error": error_msg})
+                    # Update the existing job row for this file as failed
+                    # data_manager.update_job_status(batch_id, filename=fname, status='6',
+                    #     error_count=1, error_details=[f"Quick validation failed: {error_msg}"])
+
+            # Check if all files failed validation
+            if not valid_files:
+                # Cleanup only
+                for fp in all_file_paths:
+                    try:
+                        os.remove(fp)
+                    except:
+                        pass
+                for td in temp_dirs:
+                    try:
+                        import shutil
+                        shutil.rmtree(td, ignore_errors=True)
+                    except:
+                        pass
+                return jsonify({
+                    "success": False,
+                    "error": "All files failed validation.",
+                    "batch_id": batch_id,
+                    "files": validation_results,
+                    "warnings": warnings,
+                    "mode": mode
+                }), 200
+            for fp in all_file_paths:
+                try:
+                    os.remove(fp)
+                except:
+                    pass
+            for td in temp_dirs:
+                try:
+                    import shutil
+                    shutil.rmtree(td, ignore_errors=True)
+                except:
+                    pass
+            return jsonify({
+                "success": True,
+                "mode": "quick",
+                "batch_id": batch_id,
+                "message": "Quick validation completed.",
+                "files": validation_results,
                 "warnings": warnings
-            }
-        }), 200
+            }), 200
+        elif mode == 'full':
+            # Create a job row for EACH file
+            for fp in all_file_paths:
+                file_size = os.path.getsize(fp)
+                fname = os.path.basename(fp)
+                data_manager.create_import_job(batch_id, fname, dist_id, file_size=file_size, user_id=user_id)
+
+            for fp in all_file_paths:
+                fname = os.path.basename(fp)
+                is_valid, error_msg, row_count = data_manager.quick_validate_file(fp, table_name, dist_id)
+                if is_valid:
+                    valid_files.append(fp)
+                    total_rows += row_count
+                    validation_results.append({"filename": fname, "valid": True, "rows": row_count})
+                else:
+                    validation_results.append({"filename": fname, "valid": False, "error": error_msg})
+                    # Update the existing job row for this file as failed
+                    data_manager.update_job_status(batch_id, filename=fname, status='2',
+                        error_count=1, error_details=[f"Quick validation failed: {error_msg}"])
+
+            # Check if all files failed validation
+            if not valid_files:
+                # Cleanup only
+                for fp in all_file_paths:
+                    try:
+                        os.remove(fp)
+                    except:
+                        pass
+                for td in temp_dirs:
+                    try:
+                        import shutil
+                        shutil.rmtree(td, ignore_errors=True)
+                    except:
+                        pass
+                return jsonify({
+                    "success": False,
+                    "error": "All files failed validation.",
+                    "batch_id": batch_id,
+                    "files": validation_results,
+                    "warnings": warnings,
+                    "mode": mode
+                }), 200
+            thread = threading.Thread(
+                target=data_manager.process_import_async,
+                args=(valid_files, table_name, batch_id, temp_dirs),
+                daemon=True
+            )
+            thread.start()
+            filenames = [os.path.basename(fp) for fp in valid_files]
+
+            data_manager._check_missing_table_files(all_file_paths, batch_id, dist_id)
+            return jsonify({
+                "success": True,
+                "mode": "full",
+                "data": {
+                    "batch_id": batch_id,
+                    "status": "pending",
+                    "total_rows": total_rows,
+                    "files": filenames,
+                    "validation": validation_results,
+                    "warnings": warnings,
+                    "message": "Import job started. Use GET /api/jobs/<batch_id> to check progress."
+                }
+            }), 202
+        else:  # mode == 'both' (missing/invalid)
+            # Create a job row for EACH file with file size
+            for fp in all_file_paths:
+                file_size = os.path.getsize(fp)
+                fname = os.path.basename(fp)
+                data_manager.create_import_job(batch_id, fname, dist_id, file_size=file_size, user_id=user_id)
+
+            # Quick validate each file
+            for fp in all_file_paths:
+                fname = os.path.basename(fp)
+                is_valid, error_msg, row_count = data_manager.quick_validate_file(fp, table_name, dist_id)
+                if is_valid:
+                    valid_files.append(fp)
+                    total_rows += row_count
+                    validation_results.append({"filename": fname, "valid": True, "rows": row_count})
+                else:
+                    validation_results.append({"filename": fname, "valid": False, "error": error_msg})
+                    # Update the existing job row for this file as failed
+                    # data_manager.update_job_status(batch_id, filename=fname, status='6',
+                    #     error_count=1, error_details=[f"Quick validation failed: {error_msg}"])
+
+            # Check if all files failed validation
+            if not valid_files:
+                # Cleanup only
+                for fp in all_file_paths:
+                    try:
+                        os.remove(fp)
+                    except:
+                        pass
+                for td in temp_dirs:
+                    try:
+                        import shutil
+                        shutil.rmtree(td, ignore_errors=True)
+                    except:
+                        pass
+                data_manager.update_job_status(batch_id, status='2', message=error_msg)
+                return jsonify({
+                    "success": False,
+                    "error": "All files failed validation.",
+                    "batch_id": batch_id,
+                    "files": validation_results,
+                    "warnings": warnings,
+                    "mode": mode
+                }), 200
+
+            # Start async import thread
+            data_manager.update_job_status(batch_id, total_rows=total_rows)
+            thread = threading.Thread(
+                target=data_manager.process_import_async,
+                args=(valid_files, table_name, batch_id, temp_dirs),
+                daemon=True
+            )
+            thread.start()
+            filenames = [os.path.basename(fp) for fp in valid_files]
+
+            data_manager._check_missing_table_files(all_file_paths, batch_id, dist_id)
+            return jsonify({
+                "success": True,
+                "mode": "both",
+                "batch_id": batch_id,
+                "message": "Quick validation completed. Import job started.",
+                "files": validation_results,
+                "warnings": warnings,
+                "data": {
+                    "status": "pending",
+                    "total_rows": total_rows,
+                    "files": filenames,
+                    "message": "Import job started. Use GET /api/jobs/<batch_id> to check progress."
+                }
+            }), 200
 
     except Exception as e:
-        return jsonify({"success": False, "error": f"Server error: {str(e)}"}), 500
-    finally:
         for fp in all_file_paths:
             try:
                 os.remove(fp)
@@ -315,6 +586,32 @@ def api_import_file():
                 shutil.rmtree(td, ignore_errors=True)
             except:
                 pass
+        return jsonify({"success": False, "error": f"Server error: {str(e)}", "mode": mode}), 500
+
+
+@app.route('/api/jobs', methods=['GET'])
+def api_get_jobs():
+    """API: List all import jobs."""
+    limit = request.args.get('limit', 50, type=int)
+    jobs = data_manager.get_all_jobs(limit=limit)
+    return jsonify({"success": True, "data": jobs}), 200
+
+
+@app.route('/api/jobs/<batch_id>', methods=['GET'])
+def api_get_job(batch_id):
+    """API: Get status of a specific import job by batch_id."""
+    job = data_manager.get_job(batch_id)
+    if job:
+        return jsonify({"success": True, "data": job}), 200
+    else:
+        return jsonify({"success": False, "error": "Job not found."}), 404
+
+
+@app.route('/api/jobs/<batch_id>/details', methods=['GET'])
+def api_get_job_details(batch_id):
+    """API: Get per-file details for a specific import job."""
+    details = data_manager.get_job_file_details(batch_id)
+    return jsonify({"success": True, "data": details}), 200
 
 
 @app.route('/api/tables', methods=['GET'])
@@ -334,7 +631,8 @@ def api_create_table():
     table_name = data.get('table_name')
     display_name = data.get('display_name')
     allowed_filename = data.get('allowed_filename', '')
-    columns = data.get('columns', [])  # [{"name": "col", "type": "str"}]
+    allowed_filename = data.get('allowed_filename', '')
+    columns = data.get('columns', [])  # [{"name": "col", "type": "str", "is_unique": false}]
 
     if not table_name or not display_name:
         return jsonify({"success": False, "error": "table_name and display_name are required."}), 400
@@ -361,11 +659,12 @@ def api_add_column(table_name):
 
     column_name = data.get('column_name')
     data_type = data.get('data_type', 'str')
+    is_unique = data.get('is_unique', False)
 
     if not column_name:
         return jsonify({"success": False, "error": "column_name is required."}), 400
 
-    if data_manager.add_column_to_table(table_name, column_name, data_type):
+    if data_manager.add_column_to_table(table_name, column_name, data_type, is_unique=is_unique):
         return jsonify({"success": True, "data": {"message": f"Column '{column_name}' added to {table_name}."}}), 201
     else:
         return jsonify({"success": False, "error": "Failed to add column."}), 400
@@ -394,9 +693,10 @@ def api_update_column(column_id):
         return jsonify({"success": False, "error": "JSON body required."}), 400
 
     is_mandatory = data.get('is_mandatory', False)
+    is_unique = data.get('is_unique', False)
     data_type = data.get('data_type', 'str')
 
-    if data_manager.update_column_config(column_id, is_mandatory, data_type):
+    if data_manager.update_column_config(column_id, is_mandatory, is_unique, data_type):
         return jsonify({"success": True, "data": {"message": "Column config updated."}}), 200
     else:
         return jsonify({"success": False, "error": "Failed to update column config."}), 400
@@ -426,7 +726,23 @@ def api_delete_alias(alias_id):
         return jsonify({"success": True, "data": {"message": "Alias deleted."}}), 200
     else:
         return jsonify({"success": False, "error": "Failed to delete alias."}), 400
+    
+@app.route('/batch')
+def batch_page():
+    jobs = data_manager.get_all_jobs(limit=100)
+    return render_template('batch.html', jobs=jobs)
+
+
+@app.route('/batch/<batch_id>')
+def batch_detail_page(batch_id):
+    job = data_manager.get_job(batch_id)
+    if not job:
+        flash("Job not found.", "error")
+        return redirect(url_for('batch_page'))
+    
+    details = data_manager.get_job_file_details(batch_id)
+    return render_template('job_details.html', job=job, details=details)
 
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(host='0.0.0.0', debug=True)

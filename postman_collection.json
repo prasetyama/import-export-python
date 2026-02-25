@@ -1,0 +1,354 @@
+{
+    "info": {
+        "_postman_id": "import-export-api",
+        "name": "Import Export App API",
+        "description": "REST API endpoints for Import/Export Application",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "variable": [
+        {
+            "key": "base_url",
+            "value": "http://127.0.0.1:5000",
+            "type": "string"
+        }
+    ],
+    "item": [
+        {
+            "name": "Import",
+            "item": [
+                {
+                    "name": "Import Files (Auto-detect)",
+                    "request": {
+                        "method": "POST",
+                        "header": [],
+                        "body": {
+                            "mode": "formdata",
+                            "formdata": [
+                                {
+                                    "key": "files",
+                                    "type": "file",
+                                    "src": "",
+                                    "description": "Select one or more files (.csv, .txt, .zip)"
+                                },
+                                {
+                                    "key": "table_name",
+                                    "value": "auto",
+                                    "type": "text",
+                                    "description": "Use 'auto' for filename-based detection or specify table name (e.g. 'stocks', 'sales')"
+                                }
+                            ]
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/import",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "import"
+                            ]
+                        },
+                        "description": "Upload multiple files (CSV, TXT, or ZIP) for import. Set table_name to 'auto' for filename-based auto-detection, or specify a target table name."
+                    }
+                },
+                {
+                    "name": "Import Files (Specific Table)",
+                    "request": {
+                        "method": "POST",
+                        "header": [],
+                        "body": {
+                            "mode": "formdata",
+                            "formdata": [
+                                {
+                                    "key": "files",
+                                    "type": "file",
+                                    "src": "",
+                                    "description": "Select one or more files (.csv, .txt, .zip)"
+                                },
+                                {
+                                    "key": "table_name",
+                                    "value": "stocks",
+                                    "type": "text",
+                                    "description": "Target table name: stocks, sales, product, etc."
+                                }
+                            ]
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/import",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "import"
+                            ]
+                        },
+                        "description": "Upload files and import directly to a specific table (bypasses auto-detect, but filename validation still applies)."
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Tables",
+            "item": [
+                {
+                    "name": "Get All Tables",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/tables",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "tables"
+                            ]
+                        },
+                        "description": "List all configured import tables."
+                    }
+                },
+                {
+                    "name": "Create New Table",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"table_name\": \"products\",\n    \"display_name\": \"Product Data\",\n    \"allowed_filename\": \"product_list\",\n    \"columns\": [\n        {\"name\": \"sku\", \"type\": \"str\"},\n        {\"name\": \"product_name\", \"type\": \"str\"},\n        {\"name\": \"price\", \"type\": \"int\"},\n        {\"name\": \"category\", \"type\": \"str\"}\n    ]\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/tables",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "tables"
+                            ]
+                        },
+                        "description": "Create a new import table with initial columns."
+                    }
+                },
+                {
+                    "name": "Update Allowed Filename",
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"allowed_filename\": \"pv_inventory\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/tables/1/filename",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "tables",
+                                "1",
+                                "filename"
+                            ]
+                        },
+                        "description": "Update the allowed_filename for a table. Replace '1' with the table ID."
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Columns",
+            "item": [
+                {
+                    "name": "Get Columns Config",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/tables/stocks/columns",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "tables",
+                                "stocks",
+                                "columns"
+                            ]
+                        },
+                        "description": "Get column definitions and aliases for a specific table. Replace 'stocks' with table_name."
+                    }
+                },
+                {
+                    "name": "Add Column to Table",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"column_name\": \"notes\",\n    \"data_type\": \"str\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/tables/stocks/columns",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "tables",
+                                "stocks",
+                                "columns"
+                            ]
+                        },
+                        "description": "Add a new column to an existing table. data_type: 'str', 'int', or 'date'."
+                    }
+                },
+                {
+                    "name": "Update Column Config",
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"is_mandatory\": true,\n    \"data_type\": \"str\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/columns/7",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "columns",
+                                "7"
+                            ]
+                        },
+                        "description": "Update is_mandatory and data_type for a column. Replace '7' with the column ID."
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Aliases",
+            "item": [
+                {
+                    "name": "Add Alias",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"alias_name\": \"item_code\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/columns/7/aliases",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "columns",
+                                "7",
+                                "aliases"
+                            ]
+                        },
+                        "description": "Add an alias to a column. Replace '7' with the column ID."
+                    }
+                },
+                {
+                    "name": "Delete Alias",
+                    "request": {
+                        "method": "DELETE",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/aliases/1",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "aliases",
+                                "1"
+                            ]
+                        },
+                        "description": "Delete an alias by ID. Replace '1' with the alias ID."
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Jobs",
+            "item": [
+                {
+                    "name": "Get All Jobs",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/jobs?limit=50",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "jobs"
+                            ],
+                            "query": [
+                                {
+                                    "key": "limit",
+                                    "value": "50"
+                                }
+                            ]
+                        },
+                        "description": "List all import jobs, most recent first."
+                    }
+                },
+                {
+                    "name": "Get Job Status",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/jobs/{{batch_id}}",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "jobs",
+                                "{{batch_id}}"
+                            ]
+                        },
+                        "description": "Check the status and progress of a specific import job using its batch_id."
+                    }
+                }
+            ]
+        }
+    ]
+}
