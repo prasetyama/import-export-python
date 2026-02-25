@@ -1035,6 +1035,12 @@ def process_import_async(file_paths, table_name, batch_id, temp_dirs=None):
                         if 'amount_jual' in df_summary.columns:
                             total_jual = pd.to_numeric(df_summary['amount_jual'], errors='coerce').sum()
                             notes += f"; Total Penjualan: Rp {total_jual:,.0f}"
+                        if 'exportdate' or 'export_date' in df_summary.columns:
+                            dates = pd.to_datetime(df_summary['exportdate'], errors='coerce').dropna()
+                            if not dates.empty:
+                                min_date = dates.min().strftime('%d/%m/%Y')
+                                max_date = dates.max().strftime('%d/%m/%Y')
+                                notes += f"; dengan Export Date: {min_date} s/d {max_date}"
                     except Exception as e_date:
                         print(f"Warning: Could not extract date range from DOTANGGAL: {e_date}")
                     drive_link = None
