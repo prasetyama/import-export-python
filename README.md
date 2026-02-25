@@ -288,3 +288,6 @@ import_export_app/
 | `quick` | ✅ | ❌ | Hanya validasi, tidak import |
 | `full` | ✅ | ✅ | Validasi + import ke database |
 | `both` | ✅ | ✅ | Default jika mode tidak diisi |
+
+## GDRIVE
+File diupload ke shared folder dengan nama distributor_file
