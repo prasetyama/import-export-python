@@ -1045,7 +1045,17 @@ def process_import_async(file_paths, table_name, batch_id, temp_dirs=None):
                         print(f"Warning: Could not extract date range from DOTANGGAL: {e_date}")
                     drive_link = None
 
-                    upload_to_gdrive([filepath])
+                    upload_to_gdrive_result = upload_to_gdrive([filepath])
+                    if isinstance(upload_to_gdrive_result, list):
+                        for res in upload_to_gdrive_result:
+                            if 'error' in res:
+                                notes += f"; GDrive upload failed: {res['error']}"
+                            else:
+                                drive_link = f"https://drive.google.com/file/d/{res['gdrive_file_id']}/view?usp=drive_link"
+                                notes += f"; Uploaded to GDrive with link : {drive_link}"
+                                
+                    else:
+                        notes += f"; GDrive upload skipped: {upload_to_gdrive_result}"
                     
                     if not file_errors: 
                         file_status = '9'
