@@ -368,9 +368,27 @@ def import_file_process(filename, table_name):
         insert_keys = [k for k in configs.keys() if k != 'ImportDate']
         placeholders = ', '.join(['%s'] * len(insert_keys))
         columns_sql = ', '.join(insert_keys)
-        update_clause = ", ".join([f"{col}=VALUES({col})" for col in insert_keys])
-        update_clause += ", ImportDate=NOW()"
-        insert_query = f"INSERT INTO {table_name} ({columns_sql}, ImportDate) VALUES ({placeholders}, NOW()) ON DUPLICATE KEY UPDATE {update_clause}"
+
+        # 1. Condition for ON DUPLICATE KEY UPDATE (if exists)
+        # Only update ImportDate if any of the data columns changed
+        change_conditions = " OR ".join([f"NOT ({col} <=> VALUES({col}))" for col in insert_keys])
+        update_clause = f"ImportDate = IF({change_conditions}, VALUES(ImportDate), ImportDate)"
+        update_clause += ", " + ", ".join([f"{col}=VALUES({col})" for col in insert_keys])
+
+        # 2. Condition for preventing exact duplicate rows (for tables without unique keys)
+        # We check if an exact match of all columns already exists
+        where_conditions = " AND ".join([f"{col} <=> %s" for col in insert_keys])
+        
+        insert_query = f"""
+            INSERT INTO {table_name} ({columns_sql}, ImportDate) 
+            SELECT {placeholders}, NOW() 
+            FROM DUAL 
+            WHERE NOT EXISTS (
+                SELECT 1 FROM {table_name} 
+                WHERE {where_conditions}
+            )
+            ON DUPLICATE KEY UPDATE {update_clause}
+        """
 
         data_to_insert = []
         errors = []
@@ -419,12 +437,22 @@ def import_file_process(filename, table_name):
             if not row_valid:
                 errors.extend(row_errors)
                 continue
-            data_to_insert.append(tuple(row_vals))
+            
+            # Pass values twice: once for SELECT, once for WHERE NOT EXISTS
+            data_to_insert.append(tuple(row_vals) + tuple(row_vals))
 
         if data_to_insert:
-            cursor.executemany(insert_query, data_to_insert)
+            success_count = 0
+            for vals in data_to_insert:
+                try:
+                    cursor.execute(insert_query, vals)
+                    if cursor.rowcount > 0:
+                        success_count += 1
+                except Exception as e:
+                    errors.append(f"SQL Error: {str(e)}")
+            
             connection.commit()
-            return True, {"success_count": cursor.rowcount, "errors": errors}
+            return True, {"success_count": success_count, "errors": errors}
         else:
             return False, errors + ["No valid rows to insert."]
 
