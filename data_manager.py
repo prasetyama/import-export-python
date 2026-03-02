@@ -338,7 +338,7 @@ def import_file_process(filename, table_name):
                 return False, [f"Filename '{name_only}' does not match any of the configured allowed filenames for table '{table_name}'. Expected one of: {', '.join(allowed_list)}"]
 
         # Read File
-        df = pd.read_csv(filename, sep=None, engine='python')
+        df = pd.read_csv(filename, sep=None, engine='python', dtype=str)
 
         # Normalize Headers
         df.columns = [str(col).strip().lower() for col in df.columns]
@@ -857,7 +857,7 @@ def quick_validate_file(filepath, table_name, dist_id=None):
     if not valid: return False, errs[0], 0
 
     try:
-        df = pd.read_csv(filepath, sep=None, engine='python')
+        df = pd.read_csv(filepath, sep=None, engine='python', dtype=str)
         if df.empty: return False, "File is empty.", 0
         total_rows = len(df)
 
@@ -1052,7 +1052,7 @@ def process_import_async(file_paths, table_name, batch_id, temp_dirs=None):
 
                     # Extract date range summary from DOTANGGAL column if present
                     try:
-                        df_summary = pd.read_csv(filepath, sep=None, engine='python')
+                        df_summary = pd.read_csv(filepath, sep=None, engine='python', dtype=str)
                         df_summary.columns = [str(col).strip().lower() for col in df_summary.columns]
                         if 'dotanggal' in df_summary.columns:
                             dates = pd.to_datetime(df_summary['dotanggal'], errors='coerce').dropna()
